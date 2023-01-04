@@ -1,0 +1,5 @@
+ #set editing-mode vi
+
+# this can be used in a foreign Python interpreter
+# import readline
+# readline.parse_and_bind("set editing-mode vi")

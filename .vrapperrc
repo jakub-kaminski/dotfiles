@@ -1,0 +1,47 @@
+" change the mapleader from \ to ,
+set timeout timeoutlen=150 ttimeoutlen=100
+let mapleader=","
+
+" Add new empty lines in the normal mode the easy way:
+nmap <S-Enter> O<Esc>j
+nmap <CR> o<Esc>k
+
+" Remap semicolon to colon
+nnoremap ; :
+nnoremap : ;
+vnoremap ; :
+
+" nnoremap f0 /\v\d{1,}<CR>
+
+
+set ignorecase
+set surround
+set number
+set relativenumber
+set incsearch
+set nocompatible
+
+" scrolloff to see below and above text
+set scrolloff=3
+
+"enable copying to externall applications
+"install vim-gui-common package to do it
+set clipboard=unnamedplus
+
+"""""""""""" To be synchronized with .vimrc
+
+inoremap kj <esc>
+inoremap LL <esc>la
+inoremap HH <esc>ha
+
+" delete to blackhole
+nnoremap <silent> <Leader>d "_d
+xnoremap <silent> <Leader>d "_d
+
+" yank line from the 1st non-blank character to the end of line
+nnoremap <silent> yil ^yg_
+
+
+set timeout timeoutlen=1000 ttimeoutlen=100
+
+" cnoremap <expr> %%  getcmdtype() == ':' ? expand('%:h').'/' : '%%'

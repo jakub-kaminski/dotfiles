@@ -1,0 +1,7 @@
+[user]
+	name = Jakub
+	email = jakub-kaminski@users.noreply.github.com
+[core]
+	autocrlf = input
+[credential]
+	helper = store

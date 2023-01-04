@@ -1,0 +1,85 @@
+# This setup holds for Huion New 1060 Plus Graphical Tablet
+# Set key
+
+# Check if tablet is connected
+devices_string=$(lsusb) #list devices connected
+if [[ $devices_string == *"Wacom Co"* ]]; then
+    # Comment in Evince
+    xsetwacom set "HID 256c:006e Pad pad" button 12 key Ctrl H
+    xsetwacom set "HID 256c:006e Pad pad" button 11 key s
+
+    #xsetwacom set "HID 256c:006e Pad pad" button 10 key j
+    #xsetwacom set "HID 256c:006e Pad pad" button 9 key k
+
+    xsetwacom set "HID 256c:006e Pad pad" button 10 key n
+    xsetwacom set "HID 256c:006e Pad pad" button 9 key p
+
+    xsetwacom set "HID 256c:006e Pad pad" button 8 key w
+    # automatic zoom
+    #xsetwacom set "HID 256c:006e Pad pad" button 3 key a
+    # fit page to window
+    xsetwacom set "HID 256c:006e Pad pad" button 3 key f
+
+    # TODO: button 2
+    xsetwacom set "HID 256c:006e Pad pad" button 2 key F9
+    xsetwacom set "HID 256c:006e Pad pad" button 1 key d
+
+    # Note that you rotate stylus nor the pad
+    xsetwacom set "HID 256c:006e Pen stylus" Rotate half
+
+    # default pad area is 10" x 6.25", LPI=5080 (lines per inch)
+    #Set the tablet input area in device coordinates in the form top left x/y and bottom right x/y
+    # removing 1" from each corner
+    #xsetwacom set "HID 256c:006e Pen stylus" Area 5080 5080 47720 26670
+    # removing 2" from each corner
+    #xsetwacom set "HID 256c:006e Pen stylus" Area 10160 10160 42640 21590
+
+    # removing 2/10 total diameter
+    # Handling y coordinates: (6.25*0.10)*5080 = 3175
+    # Handling y coordinates: (6.25 - (6.25*0.10))*5080 = 28575
+    #xsetwacom set "HID 256c:006e Pen stylus" Area 5080 3175 47720 28575
+
+    # removing 3/10 total diameter
+    # Handling y coordinates: (6.25*0.15)*5080 = 4763
+    # Handling y coordinates: (6.25 - (6.25*0.15))*5080 = 26987
+    xsetwacom set "HID 256c:006e Pen stylus" Area 7620 4763 45180 26987
+
+fi
+
+#echo $(( 5080*9 ))
+
+# Dimensions in inches
+#left_up_x = 1
+#left_up_y = 1
+#right_down_x = 9
+#right_down_y = 5.25
+
+#declare -r left_up_x=2
+#declare -r left_up_y=2
+#declare -r right_down_x=8
+#declare -r right_down_y=4.25
+
+#xsetwacom set "HID 256c:006e Pad pad" Area $(($left_up_x * 5080)) $(($left_up_y * 5080)) $(($right_down_x * 5080)) $(($right_down_y * 5080))
+
+# Huion New 1060 Plus TABLET LAYOUT
+#  ______________________________________
+# |                                     |
+# | [ 1  ] [ 2  ]                       |
+# | [ 3  ] [ 8  ]                       |
+# | [ 9  ] [ 10 ]                       |
+# |                                     |
+# | [ 11 ] [ 12 ]                       |
+# | [ x  ] [ x  ]                       |
+# | [ x  ] [ x  ]                       |
+# |_____________________________________|
+
+#  ______________________________________
+# |                                     |
+# |                       [ x  ] [ x  ] |
+# |                       [ x  ] [ x  ] |
+# |                       [ 12 ] [ 11 ] |
+# |                                     |
+# |                       [ 10 ] [ 9  ] |
+# |                       [ 8  ] [ 3  ] |
+# |                       [ 2  ] [ 1  ] |
+# |_____________________________________|

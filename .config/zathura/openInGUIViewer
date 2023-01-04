@@ -1,0 +1,6 @@
+#!/bin/bash
+address=$1;
+
+#address="${args[@]}"
+#xterm -e sh -c "ranger --selectfile='$address'"
+evince "$address"
