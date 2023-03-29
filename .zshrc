@@ -1,7 +1,3 @@
-
-# If you come from bash you might have to change your $PATH.
-# export PATH=$HOME/bin:/usr/local/bin:$PATH
-
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
@@ -13,61 +9,6 @@ ZSH_THEME="robbyrussell"
 # Verasonics
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$HOME/lib"
 
-# --files: List files that would be searched but do not search
-# --no-ignore: Do not respect .gitignore, etc...
-# --hidden: Search hidden files and folders
-# --follow: Follow symlinks
-# --glob: Additional conditions for search (in this case ignore everything in the .git/ folder)
-
-# Set list of themes to load
-# Setting this variable when ZSH_THEME=random
-# cause zsh load theme from this variable instead of
-# looking in ~/.oh-my-zsh/themes/
-# An empty array have no effect
-# ZSH_THEME_RANDOM_CANDIDATES=( "robbyrussell" "agnoster" )
-
-# Uncomment the following line to use case-sensitive completion.
-# CASE_SENSITIVE="true"
-
-# Uncomment the following line to use hyphen-insensitive completion. Case
-# sensitive completion must be off. _ and - will be interchangeable.
-# HYPHEN_INSENSITIVE="true"
-
-# Uncomment the following line to disable bi-weekly auto-update checks.
-# DISABLE_AUTO_UPDATE="true"
-
-# Uncomment the following line to change how often to auto-update (in days).
-# export UPDATE_ZSH_DAYS=13
-
-# Uncomment the following line to disable colors in ls.
-# DISABLE_LS_COLORS="true"
-
-# Uncomment the following line to disable auto-setting terminal title.
-# DISABLE_AUTO_TITLE="true"
-
-# Uncomment the following line to enable command auto-correction.
-# ENABLE_CORRECTION="true"
-
-# Uncomment the following line to display red dots whilst waiting for completion.
-# COMPLETION_WAITING_DOTS="true"
-
-# Uncomment the following line if you want to disable marking untracked files
-# under VCS as dirty. This makes repository status check for large repositories
-# much, much faster.
-# DISABLE_UNTRACKED_FILES_DIRTY="true"
-
-# Uncomment the following line if you want to change the command execution time
-# stamp shown in the history command output.
-# The optional three formats: "mm/dd/yyyy"|"dd.mm.yyyy"|"yyyy-mm-dd"
-# HIST_STAMPS="mm/dd/yyyy"
-
-# Would you like to use another custom folder than $ZSH/custom?
-# ZSH_CUSTOM=/path/to/new-custom-folder
-
-# Which plugins would you like to load? (plugins can be found in ~/.oh-my-zsh/plugins/*)
-# Custom plugins may be added to ~/.oh-my-zsh/custom/plugins/
-# Example format: plugins=(rails git textmate ruby lighthouse)
-# Add wisely, as too many plugins slow down shell startup.
 plugins=(
   git
   docker
@@ -80,7 +21,6 @@ plugins=(
 )
 
 source $ZSH/oh-my-zsh.sh
-
 
 #   _________________________
 #   *** VARIABLES SECTION ***
@@ -102,7 +42,6 @@ alias pulse_start="bash /usr/local/pulse/pulseUi"
 alias r="ranger"
 
 alias jl='cd /home/jakub/Dropbox/Aplikacje/Overleaf/Thyroid_Journal'
-
 #alias ambf="bash /usr/local/pulse/pulseUi"
 
 # credits: https://stackoverflow.com/a/34340688/12070209
@@ -114,7 +53,7 @@ ambf_sim() {
 
 
 
-alias wpihours="/usr/bin/google-chrome www.wpi.edu/student-experience/sports-recreation/sports-recreation-center"
+#alias wpihours="/usr/bin/google-chrome www.wpi.edu/student-experience/sports-recreation/sports-recreation-center"
 
 #   *** IDE, REPL ***
 #alias clion_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/183.5429.37/bin/clion.sh"
@@ -123,17 +62,15 @@ alias wpihours="/usr/bin/google-chrome www.wpi.edu/student-experience/sports-rec
 
 #alias clion_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/213.6461.75/bin/clion.sh"
 
-alias clion_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/222.4345.21/bin/clion.sh"
+#alias clion_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/222.4345.21/bin/clion.sh"
 
 
 #alias pycharm_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/PyCharm-P/ch-0/193.5233.109/bin/pycharm.sh"
 alias pycharm_start="bash /home/jakub/.local/share/JetBrains/Toolbox/apps/PyCharm-P/ch-0/213.6461.77/bin/pycharm.sh"
 
-#alias matlab="/usr/local/MATLAB/R2021a/bin/matlab"
-#alias matlabt="/usr/local/MATLAB/R2021a/bin/matlab -nodesktop"
-alias matlab="/usr/local/MATLAB/R2022b/bin/matlab"
-alias matlabt="/usr/local/MATLAB/R2022b/bin/matlab -nodesktop"
-#alias matlabt22="/home/jakub/matlab2022/bin/matlab -nodesktop"
+alias matlab="/usr/local/MATLAB/R2021a/bin/matlab"
+alias matlabt="/usr/local/MATLAB/R2021a/bin/matlab -nodesktop"
+alias matlabt22="/home/jakub/matlab2022/bin/matlab -nodesktop"
 
 export MESA_LOADER_DRIVER_OVERRIDE=i965
 
@@ -173,11 +110,6 @@ compinit
 
 # set PATH so it includes user's private bin directories
 # PATH="$HOME/bin:$HOME/.local/bin:$PATH"
-#
-#
-PATH="$HOME/Documents/node/node-v16.17.0-linux-x64/bin:$PATH"
-
-PATH="$HOME/.local/bin:$PATH"
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
@@ -236,9 +168,8 @@ bindkey -M vicmd 'k' up-line-or-search
 bindkey -M vicmd 'j' down-line-or-search
 
 
-export VISUAL=/home/jakub/.local/bin/nvim
-export EDITOR=/home/jakub/.local/bin/nvim
-
+export VISUAL=/usr/local/bin/nvim
+export EDITOR=/usr/local/bin/nvim
 
 # `v` is already mapped to visual mode, so we need to use a different key to
 # open the current command text in Vim
@@ -280,12 +211,10 @@ export NO_AT_BRIDGE=1
 #source /opt/ros/melodic/setup.zsh
 #source /opt/ros/noetic/setup.zsh
 
-#source /opt/ros/foxy/setup.zsh
-source /opt/ros/noetic/setup.zsh
-source /home/jakub/moveit_ws/devel/setup.zsh
-#source /home/jakub/ros2_ws/install/setup.zsh
+source /opt/ros/foxy/setup.zsh
+source /home/jakub/ros2_ws/install/setup.zsh
 #source /home/jakub/ros2_ws2_docker/install/setup.zsh
-#source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.zsh
+source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.zsh
 
 #source /home/jakub/catkin_ws/devel/setup.zsh
 #source ~/catkin_ws/devel/setup.zsh
@@ -437,6 +366,3 @@ unset __conda_setup
 #source ~/test_ws/devel/setup.zsh
 #source ~/ros_workspace/devel/setup.zsh
 #source ~/ambf/build/devel/setup.zsh
-
-source "/home/jakub/Documents/WebAssembly/emsdk/emsdk_env.sh"
-
