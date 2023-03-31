@@ -60,6 +60,7 @@ This function should only modify configuration layer settings."
      ;;        shell-default-position 'bottom)
      spell-checking
      syntax-checking
+     treemacs
      ;; version-control
      )
 
@@ -598,7 +599,7 @@ If you are unsure, try setting them in `dotspacemacs/user-config' first."
      (C . t)
      (python . t)
      (lisp . t)
-     (shell . t)
+     (sh . t)
      ))
 
   (defvar org-babel-eval-verbose t
