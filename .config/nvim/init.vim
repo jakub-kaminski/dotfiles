@@ -21,7 +21,7 @@ endif
 " *** SETTING RUNTIME PATH SECTION ***
 " ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 "
-set runtimepath+="/home/jakub/.local/share/nvim/plugged/vim-snippets/UltiSnips" "TODO
+"set runtimepath+="/home/jakub/.local/share/nvim/plugged/vim-snippets/UltiSnips" "TODO
 set rtp+=/usr/local/opt/fzf "TODO: not full name?
 
 let g:python_host_prog = '/usr/bin/python'
@@ -114,6 +114,7 @@ set t_Co=256  "TODO: possibly move to the end?
 
 call plug#begin('~/.local/share/nvim/plugged')
 
+Plug 'github/copilot.vim'
 Plug 'liuchengxu/vim-which-key', { 'on': ['WhichKey', 'WhichKey!'] } " List all keys configuration
 
 Plug 'tpope/vim-fugitive' "TODO: describe
@@ -148,7 +149,7 @@ Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
 Plug 'metakirby5/codi.vim'
 
-Plug 'SirVer/ultisnips', { 'do': ':UpdateRemotePlugins' } " Snippets-related pluggins
+"Plug 'SirVer/ultisnips', { 'do': ':UpdateRemotePlugins' } " Snippets-related pluggins
 
 " TODO: consider vimtex for tex file autocompletion
 "https://www.reddit.com/r/vim/comments/b6c6iw/contextual_autocomplete/
@@ -295,7 +296,7 @@ let g:sneak#s_next = 1
 "map n <Plug>Sneak_; " TODO: figure out n/N mappings in search results
 "map N <Plug>Sneak_;
 
-nnoremap <leader>u :UltiSnipsEdit<CR>
+"nnoremap <leader>u :UltiSnipsEdit<CR>
 
 
 " go to the next or previous error detected by ALE 'w0rp/ale'
@@ -695,9 +696,9 @@ cnoreabbrev rg Ack!
 "call lsp#server#add('python', 'pyls')
 
 " Snippets Plugin
-let g:ycm_use_ultisnips_completer = 0
-let g:UltiSnipsSnippetsDir="/home/jakub/.local/share/nvim/plugged/vim-snippets/snippets"
-let g:UltiSnipsSnippetDirectories=["UltiSnips"]
+"let g:ycm_use_ultisnips_completer = 0
+"let g:UltiSnipsSnippetsDir="/home/jakub/.local/share/nvim/plugged/vim-snippets/snippets"
+"let g:UltiSnipsSnippetDirectories=["UltiSnips"]
 
 
 "To make <cr> select the first completion item and confirm the completion when no item has been selected:
@@ -1374,3 +1375,6 @@ endfunction
 "
 
 nnoremap <unique><silent> <leader>t :call OpenZathura()<CR>
+
+imap <C-e> <Plug>(copilot-next)
+imap <C-d> <Plug>(copilot-previous)

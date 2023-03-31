@@ -207,6 +207,9 @@ bindsym $mod+a [class="Audio-recorder"] scratchpad show, resize set 1920 1080, m
 for_window [title="brain.fm - Google Chrome"] move scratchpad, border pixel 0
 bindsym $mod+b [title="brain.fm - Google Chrome"] scratchpad show, resize set 1920 1080, move position center
 
+for_window [title="GPT4-Programming - Google Chrome"] move scratchpad, border pixel 0
+bindsym $mod+g [title="GPT4-Programming - Google Chrome"] scratchpad show, resize set 1920 2060, move position center
+
 #exec --no-startup-id "bash /home/jakub/.scripts/launch-todo-scratchpad.sh"
 #bindsym $mod+e [class="Gedit"] scratchpad show
 
@@ -330,7 +333,7 @@ bindsym $mod+d exec rofi -modi drun -show drun -opacity "85" -bg "#dddddd" -fg "
 bindsym $mod+f			fullscreen toggle
 ##bindsym $mod+Shift+f
 
-bindsym $mod+g			workspace prev
+#bindsym $mod+g			workspace prev
 # bindsym $mod+Shift+g		exec --no-startup-id gimp; workspace $ws5
 
 bindsym $mod+h			focus left
