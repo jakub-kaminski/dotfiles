@@ -1,0 +1,13 @@
+/*.ssh/***/
+/*.fonts/***/
+/*.oh-my-zsh/***/
+
+/.config/ranger/bookmarks
+/.config/ranger/history
+
+.gitconfig
+.zshrc.backup
+.zshrc-private
+*.pyo
+*.swp
+.tmux/plugins/

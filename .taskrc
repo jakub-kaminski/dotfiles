@@ -1,0 +1,32 @@
+# [Created by task 2.5.1 3/7/2018 15:30:01]
+# Taskwarrior program configuration file.
+# Files
+data.location=/home/jakub/Dropbox/sync/.task
+
+# Show the tracking of time
+journal.time=on
+# Do not use color
+color=off
+
+# Shortcuts
+alias.dailystatus=status:completed end.after:today all
+alias.punt=modify wait:1d
+alias.someday=mod +someday wait:someday
+
+# default start on Sunday - I temporarily had mine start on Monday and went back to Sunday
+# weekstart=monday
+
+# Make searches case insensitive, personal preference
+search.case.sensitive=no
+
+# Set daily burndown as default
+alias.burndown=burndown.daily
+
+# Indicate the active task in reports
+active.indicator=>
+
+# task ready report default with custom columns
+default.command=ready
+report.ready.columns=id,start.active,depends.indicator,project,due.relative,description.desc
+report.ready.labels= ,,Depends, Project, Due, Description
+#if none of the tasks in a report have a particular column, it will not show in the report

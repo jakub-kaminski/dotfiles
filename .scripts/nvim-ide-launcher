@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#sleep 0.5
+#xterm -xrm 'XTerm.vt100.allowTitleOps: false' -T VIM-IDE -e /usr/local/bin/nvim +$1 $2
+xterm -xrm 'XTerm.vt100.allowTitleOps: false' -T VIM-IDE -e /home/jakub/.local/bin/nvim +$1 $2
+
+#i3-msg "for_window [class="XTerm"][title="VIM-IDE"] move container to workspace $ws9, border pixel 0"
+
+# JetBrains IDE Settings:
+
+# 1. Press Shift-Shift in the IDE
+# 2. Type "External tools" in the pop-up search window
+# 3. Select "External tools" in the "Settings" category in the search results
+# 4. Add a new tool with the "+" button
+# 5. In the Tool configuration window select:
+#    Name: nvim
+#    Description: -
+#    Program: /home/jakub/.scripts/nvim-ide-launcher
+#    Arguments: +$LineNumber$ $FilePath$
+#    Working Driectory: $ProjectFileDir$
+#    Advanced Options:
+#       <checked> Synchronize files after execution
+#       <checked> Open console for tool output
+
+
+# .ideavimrc settings, add line:
+#    nmap ,v :action Tool_External Tools_nvim<cr>

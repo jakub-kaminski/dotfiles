@@ -1,0 +1,899 @@
+# This configuration file is based on Luke Smith's i3wm setup:
+# originally by http://lukesmith.xyz, modified heavily
+
+# Be sure that you have your $BROWSER environmental variable set to your favorite browser.
+# E.g., put `export BROWSER="firefox"` into your bash_profile
+
+# #---Colors ---# #
+set $base00 #101218
+#set $base01 #1f222d
+set $base01 #072584
+set $base02 #252936
+set $base03 #7780a1
+set $base04 #C0C5CE
+set $base05 #d1d4e0
+set $base06 #C9CCDB
+set $base07 #ffffff
+set $base08 #ee829f
+set $base09 #f99170
+set $base0A #ffefcc
+set $base0B #a5ffe1
+set $base0C #97e0ff
+set $base0D #97bbf7
+set $base0E #c0b7f9
+set $base0F #fcc09e
+
+# Workspaces names
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
+set $ws6 "6"
+set $ws7 "7"
+set $ws8 "8"
+set $ws9 "9"
+set $ws10 "10"
+
+# Workspaces 11-20
+set $ws11 "11"
+set $ws12 "12"
+set $ws13 "13"
+set $ws14 "14"
+set $ws15 "15"
+set $ws16 "16"
+set $ws17 "17"
+set $ws18 "18"
+set $ws19 "19"
+set $ws20 "20"
+
+###########################
+# ---Basic Definitions--- #
+###########################
+
+# Needed for i3-gaps, fonts
+#for_window [class="^.*"] border pixel 0
+for_window [class="^.*"] border normal
+
+for_window [title="Transparent Overlay"] opacity 0.01
+for_window [class="pygame"] border pixel 0, opacity 0.01
+
+#for_window [class="^Webots$"] floating enable
+#for_window [class="^Webots$"] border none
+
+#for_window [class="Gnome-terminal"] border normal
+for_window [class="XTerm"] border normal
+#for_window [class="XTerm"] border pixel 0
+for_window [class="Google-chrome"] border pixel 0
+for_window [class="Opera"] border pixel 0
+for_window [class=".*"] title_format "<b>%title</b>"
+for_window [class="Spotify"] border pixel 0
+for_window [class="jetbrains-studio"] border pixel 0
+
+#gaps inner 0
+#gaps outer 0
+#font pango:monospace 8
+font pango:System San Francisco Display 8 # alternative
+#font pango:System San Francisco Display 18
+
+# Super as the modifier key
+set $mod Mod4
+
+#set $term --no-startup-id gnome-terminal
+set $term --no-startup-id xterm
+set $redshift_with_location --no-startup-id redshift -l 55.0:15.0
+#set $term --no-startup-id gnome-terminal
+# --hide-menubar
+set $stoprec --no-startup-id killall ffmpeg
+
+#SYSTEMD
+set $shutdown sudo shutdown -h now
+set $reboot sudo reboot
+set $netrefresh --no-startup-id sudo systemctl restart NetworkManager
+set $hibernate sudo systemctl suspend
+
+##############################################
+# ---Starting External Scripts on Startup--- #
+##############################################
+
+# Set CPU cores to performance
+exec --no-startup-id bash /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/governors/performance.sh
+
+# Initial config
+exec --no-startup-id ~/.config/i3/scripts/displays/home-4k-DP.sh
+# Scalling and workspace outputs
+exec --no-startup-id xrandr --dpi 220;
+
+#Wallpaper
+exec_always feh --bg-scale /home/jakub/.wallpapers/wallpaper-3.jpg
+#exec_always feh --bg-scale /home/jakub/./config/.wallpaper.jpg
+
+#Graphic Tablet conditional setup
+exec --no-startup-id bash ~/.scripts/graphic-tablet
+
+# Redshift temperature
+exec --no-startup-id $redshift_with_location -x; exec --no-startup-id $redshift_with_location -O 3900;
+
+#Turn off touchpad
+exec --no-startup-id exec synclient TouchpadOff=1
+
+#Compton
+#exec_always compton -f
+#exec_always compton --config /home/jakub/.config/compton.conf
+
+# Target config
+exec --no-startup-id ~/.config/i3/scripts/displays/MedFusionLab/medfusion.sh
+
+#Redshift: make screen more red
+exec --no-startup-id redshift -l 55.0:15.0 -O 4500
+
+# Autokey for keybindings remapping
+exec --no-startup-id autokey-gtk
+
+# Configure keyboard
+exec --no-startup-id bash /home/jakub/.config/i3/scripts/keyboard.sh
+
+# Update keyboard profile
+exec --no-startup-id bash ~/.profile
+
+# Udiskie for automount
+ exec --no-startup-id udiskie -ans &
+
+# Scripts for pdf conversions to Kindle-friendly formats
+#exec --no-startup-id bash home/jakub/Dropbox/@Kindle/scripts/1columnProcessing.sh
+#exec --no-startup-id bash home/jakub/Dropbox/@Kindle/scripts/2columnProcessing.sh
+
+# Dropbox
+exec --no-startup-id dropbox start
+# Google Drive
+exec --no-startup-id insync start
+
+#Runs the key remapping scripts
+exec --no-startup-id ~/.scripts/remaps
+#Unclutter makes the mouse invisible after a brief period TODO: make invisibe at the moment the workspace is changed
+exec --no-startup-id unclutter
+#Network Manager applet
+exec --no-startup-id nm-applet
+#ActivityWatch: tracking time spent in apps
+exec --no-startup-id "/home/jakub/.config/i3/scripts/activity-watch-startup.sh"
+
+
+# Consider this hint: for_window [class="Evince"] move container to workspace "5: doc", workspace "5: doc", focus
+
+############################
+# ---Arrange workspaces--- #
+############################
+
+# automation
+for_window [title="^Sci-Hub :"] move container to workspace $ws10
+
+# IDE
+assign [instance="sun-awt-X11-XWindowPeer"] $ws1 #it does work
+for_window [instance="sun-awt-X11-XWindowPeer"] border pixel 0, move position center, focus
+
+# Figures Matlab
+assign [class="MATLAB R2019b - academic use"] $ws2 #it does work
+
+assign [class="Processed Image"] $ws4
+for_window [class="^Processed Image$"] move container to workspace $ws4
+
+# Rviz windows (ROS)
+assign [class="rviz"] $ws2 #it does work
+
+# Figures Matplotlib
+assign [class="Matplotlib"] $ws2 #it does work
+
+# AMBF Simulator
+assign [class="AMBF Simulator Window 1"] $ws2 #it does work
+
+# Webots Simulator
+assign [class="^Webots$"] workspace $ws3
+for_window [class="^Webots$"] move container to workspace $ws3
+
+# Browser
+for_window [class="Google-chrome"] move container to workspace $ws5
+for_window [class="Opera"] move container to workspace $ws4
+
+# Language learning this was uncommented
+assign [class="Anki"] workspace $ws9
+for_window [class="Anki"] move container to workspace $ws9
+for_window [class="Anki"][title="Add"] move container to workspace $ws8
+for_window [class="Anki"][title="Browse.+"] move container to workspace $ws8
+#for_window [class="Anki"][title="^Browse.+"] move workspace current, focus, fullscreen
+
+# Paper writing
+#for_window [class="Zotero"][title="Quick Format Citation"] move container to workspace $ws7
+#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0, fullscreen enable
+#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0, fullscreen enable
+for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, scratchpad show, resize set 1920 1080, border pixel 0, move position center
+
+# Music
+for_window [class="Spotify"] move container to workspace $ws10
+
+# Opening files from JetBrains IDE in NeoVIM instance for quick edit
+#for_window [class="XTerm"][title="VIM-IDE"] move container to workspace $ws9, border pixel 0
+#for_window [class="XTerm"][title="VIM-IDE"] border pixel 0
+for_window [class="XTerm"][title="VIM-IDE"] move scratchpad, resize set 3840 2160, border pixel 0, fullscreen enable
+for_window [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center, fullscreen enable
+#bindsym $mod+t [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center, fullscreen toggle
+# TODO: Scratchpad
+
+# tmc
+for_window [class="XTerm"][title="TMC-NOTES-.*"] move scratchpad, border none
+for_window [class="XTerm"][title="TMC-NOTES-.*"] scratchpad show, resize set 1920 1080, move position center
+
+# Global Ctrl+n to close TMC notes windows
+bindsym Control+n [title="^TMC-NOTES-"] kill
+# Global Ctrl+i to hide focused TMC notes window to scratchpad
+# Note: For xterm/nvim, this is handled by nvim mapping in init.vim
+bindsym Control+i [con_id="__focused__" title="^TMC-NOTES-"] move scratchpad
+
+#for_window [title="todo.txt"] border pixel 0, move position center, focus
+for_window [class="XTerm"][title="MY-TODOLIST"] move scratchpad, border pixel 0
+#bindsym $mod+e [class="XTerm"][title="MY-TODOLIST"] scratchpad show, resize set 1920 1080, move position center
+
+for_window [class="XTerm"][title="MY-ENGLISH"] move scratchpad, border pixel 0
+#bindsym $mod+Shift+w [class="XTerm"][title="MY-ENGLISH"] scratchpad show, resize set 2880 1620, move position center
+
+#for_window [class="XTerm"][title="MY-NOTEPAD"] move scratchpad, border pixel 0
+#bindsym $mod+w [class="XTerm"][title="MY-NOTEPAD"] scratchpad show, resize set 2880 1620, move position center
+
+for_window [class="Audio-recorder"] move scratchpad, border pixel 0
+bindsym $mod+a [class="Audio-recorder"] scratchpad show, resize set 1920 1080, move position center
+
+
+for_window [title="brain.fm - Google Chrome"] move scratchpad, border pixel 0
+bindsym $mod+b [title="brain.fm - Google Chrome"] scratchpad show, resize set 1920 1080, move position center
+
+for_window [title="GPT4-Programming - Google Chrome"] move scratchpad, border pixel 0
+bindsym $mod+g [title="GPT4-Programming - Google Chrome"] scratchpad show, resize set 1920 2060, move position center
+
+for_window [title="jkaminski-work-timeline - Google Sheets - Google Chrome"] move scratchpad, border pixel 0
+#bindsym $mod+w [title="jkaminski-work-timeline - Google Sheets - Google Chrome"] scratchpad show, resize set 1920 1920, move position center
+
+
+
+#exec --no-startup-id "bash /home/jakub/.scripts/launch-todo-scratchpad.sh"
+#bindsym $mod+e [class="Gedit"] scratchpad show
+
+# Widow Colours
+#                         border  background text    indicator
+  client.focused          $base01 $base01    $base07 $base0F
+  client.focused_inactive $base02 $base02    $base03 $base0F
+  client.unfocused        $base02 $base02    $base03 $base0F
+  client.urgent           $base02 $base08    $base00 $base0F
+
+bar {
+        #status_command i3status
+        status_command i3blocks -c ~/.config/i3/i3blocks.conf
+        #font pango: System San Francisco Display, FontAwesome 24
+        font pango: System San Francisco Display, FontAwesome 10 # alternative
+        position top
+        strip_workspace_numbers yes
+        #bindsym button4 nop
+        #bindsym button5 nop
+        colors {
+              separator $base03
+              background $base02
+              statusline $base05
+#                                border  background text
+              focused_workspace  $base01 $base01    $base07
+              active_workspace   $base01 $base02    $base03
+              inactive_workspace $base02 $base02    $base03
+              urgent_workspace   $base01 $base01    $base08
+    }
+    hidden_state hide
+    modifier Mod1+Mod4
+}
+
+#OPENRC
+#set $shutdown sudo openrc-shutdown -p
+#set $reboot sudo openrc-shutdown -r
+#set $netrefresh --no-startup-id sudo rc-service NetworkManager restart
+
+#RUNIT
+#set $shutdown sudo shutdown -h now
+#set $reboot sudo reboot
+#set $netrefresh --no-startup-id sudo sv restart NetworkManager
+
+
+# #---Basic Bindings---# #
+bindsym $mod+Return		exec $term
+#TODO: make it work
+bindsym $mod+Shift+Return 	exec $term -e nvim
+#bindsym $mod+Shift+Return 	exec $term -e nvim ~/vimwiki/index.wiki
+
+bindsym $mod+Shift+Tab 	floating toggle
+#bindsym $mod+space		focus mode_toggle
+
+bindsym $mod+Escape		workspace prev
+bindsym $mod+Shift+Escape 	exec prompt "Are you sure you want to leave i3?" "i3-msg exit"
+
+# bindsym $mod+BackSpace
+bindsym $mod+Shift+BackSpace	exec prompt "Are you sure you want to reboot?" "$reboot"
+
+
+#STOP/HIDE EVERYTHING:
+bindsym $mod+Shift+Delete	exec $truemute ; exec $truepause ; workspace lmao ; exec $term -e htop ; exec $term -e ranger
+
+# #---Letter Key Bindings---# #
+#bindsym $mod+q			kill
+#bindsym $mod+Shift+q		kill
+#bindsym $mod+Shift+q [con_id="__focused__" instance="^(?!scratchpad-name).*$"] kill
+
+#bindsym $mod+w			exec $term -e sudo wifi-menu
+#bindsym $mod+Shift+w		exec --no-startup-id $BROWSER
+
+# TODO: install neomutt
+#bindsym $mod+e			exec $term -e neomutt
+
+#JetBrains shortcut
+##bindsym $mod+Shift+e
+
+#bindsym $mod+r 			exec $term -e ranger
+#bindsym $mod+r 			exec $term ranger
+#bindsym $mod+Shift+r		exec $term -e sudo ranger
+
+#bindsym $mod+t			split toggle
+#bindsym $mod+Shift+t		gaps inner current set 15; gaps outer current set 15
+
+#bindsym $mod+y			exec $term -e calcurse
+#bindsym $mod+Shift+y		resize shrink width 10 px or 10ppt
+
+#bindsym $mod+u			[instance="dropdown"] scratchpad show; [instance="dropdown"] move position center
+#bindsym $mod+Shift+u		resize shrink height 10 px or 10 ppt
+
+#bindsym $mod+i 			exec $term -e htop
+#bindsym $mod+Shift+i		resize grow height 10 px or 10 ppt
+
+#bindsym $mod+o			sticky toggle
+#bindsym $mod+Shift+o		resize grow width 10 px or 10 ppt
+
+#bindsym $mod+p			exec $pause
+#bindsym $mod+Shift+p		exec mypaint
+
+#bindsym $mod+a			[instance="math"] scratchpad show; [instance="math"] move position center
+bindsym $mod+Shift+a		exec $term -e ncpamixer
+
+# bindsym $mod+s			gaps inner current plus 5
+# bindsym $mod+Shift+s		gaps inner current minus 5
+
+# Clipboard: replace spaces with underscores (syncs to system, vim, tmux)
+bindsym $mod+Shift+s exec --no-startup-id ~/.config/i3/scripts/clipboard-spaces-to-underscores.sh
+
+#bindsym $mod+d			exec --no-startup-id dmenu_run
+#bindsym $mod+d exec rofi -show drun -lines 5 -eh 2 -width 100 -padding 1450 -opacity "80" -bw 0 -bc "$base01" -bg "$base02" -fg "$base07" -hlbg "$base05" -columns 2 -font "System San Francisco Display 28" -hlfg "#9575cd"
+#bindsym $mod+d exec rofi -show drun -lines 5 -eh 2 -width 100 -opacity "80" -bw 0 -bc "$base01" -bg "$base02" -fg "$base07" -hlbg "$base05" -columns 2 -font "System San Francisco Display 28" -hlfg "#9575cd"
+
+#rofi -modi drun -show drun
+#bindsym $mod+d exec rofi -show drun -lines 5 -eh 2 -width 100 -padding 0 -opacity "80" -bw 0 -bc "$base01" -bg "$base02" -fg "$base07" -hlbg "$base05" -columns 2 -font "System San Francisco Display 28" -hlfg "#9575cd"
+#bindsymbindsym  $mod+d exec rofi -show run -lines 5 -eh 2 -fullscreen -width 100
+#
+bindsym $mod+d exec rofi -modi drun -show drun -opacity "85" -bg "#dddddd" -fg "#222222" -fullscreen -bw 0 -padding 300 -font "System San Francisco Display 36"
+#
+#bindsym mod+d exec rofi -show drun -width 100 -padding $(($(xwininfo -root |awk '/Height/ { print $2}')/2))
+
+#bindsym $mod+d exec rofi -show drun -lines 5 -eh 2 -width 100 -padding 100 -opacity "80" -bw 0 -bc "$base01" -bg "$base02" -fg "$base07" -hlbg "$base05" -columns 2 -font "System San Francisco Display 28" -hlfg "#9575cd"
+#bindsym $mod+Shift+d		gaps inner current set 0; gaps outer current set 0
+
+bindsym $mod+f			fullscreen toggle
+##bindsym $mod+Shift+f
+
+#bindsym $mod+g			workspace prev
+# bindsym $mod+Shift+g		exec --no-startup-id gimp; workspace $ws5
+
+bindsym $mod+h			focus left
+bindsym $mod+Shift+h		move left 30
+
+bindsym $mod+j			focus down
+bindsym $mod+Shift+j		move down 30
+
+bindsym $mod+k			focus up
+bindsym $mod+Shift+k		move up 30
+
+bindsym $mod+l			focus right
+bindsym $mod+Shift+l		move right 30
+
+# bindsym $mod+z			gaps outer current plus 5
+# bindsym $mod+Shift+z		gaps outer current minus 5
+
+bindsym $mod+x			exec --no-startup-id ~/.config/i3/lock.sh
+bindsym $mod+Shift+x		exec prompt "Are you sure you want to shutdown?" "$shutdown"
+
+bindsym $mod+c			exec --no-startup-id camtoggle
+##bindsym $mod+Shift+c
+
+bindsym $mod+v			exec $term -e ncmpcpp -s visualizer
+bindsym $mod+Shift+v		exec projectM-pulseaudio
+
+#bindsym $mod+b			floating toggle; sticky toggle; exec --no-startup-id bottomleft
+#bindsym $mod+Shift+b		exec --no-startup-id blender; workspace $ws6
+
+#bindsym $mod+n			exec $term -e newsboat
+##bindsym $mod+Shift+n
+
+bindsym $mod+m 			exec $music
+bindsym $mod+Shift+m		exec $mute
+
+
+# #---Workspace Bindings---# #
+bindsym $mod+Home		workspace $ws1
+bindsym $mod+Shift+Home		move container to workspace $ws1
+bindsym $mod+End		workspace $ws10
+bindsym $mod+Shift+End		move container to workspace $ws10
+bindsym $mod+Prior		workspace prev
+bindsym $mod+Shift+Prior	move container to workspace prev
+bindsym $mod+Next		workspace next
+bindsym $mod+Shift+Next		move container to workspace next
+bindsym $mod+Tab		workspace back_and_forth
+bindsym $mod+XF86Back		workspace prev
+##bindsym $mod+Shift+XF86Back
+bindsym $mod+XF86Forward	workspace next
+##bindsym $mod+Shift+XF86Forward
+bindsym $mod+semicolon		workspace next
+bindsym $mod+apostrophe		split horizontal ;; exec $term
+bindsym $mod+slash		split vertical ;; exec $term
+bindsym $mod+Shift+slash	kill
+bindsym $mod+Control+q		kill
+bindsym $mod+backslash		workspace back_and_forth
+
+# switch to workspace
+bindsym $mod+1		workspace $ws1; bar mode dock;
+bindsym $mod+2		workspace $ws2; bar mode dock;
+bindsym $mod+3		workspace $ws3; bar mode dock;
+bindsym $mod+4		workspace $ws4; bar mode dock;
+bindsym $mod+5		workspace $ws5; bar mode dock;
+bindsym $mod+6		workspace $ws6; bar mode dock;
+bindsym $mod+7		workspace $ws7; bar mode dock;
+bindsym $mod+8		workspace $ws8; bar mode dock;
+bindsym $mod+9		workspace $ws9; bar mode dock;
+bindsym $mod+0		workspace $ws10; bar mode dock;
+
+# move focused container to workspace
+bindsym $mod+Shift+1	move container to workspace $ws1
+bindsym $mod+Shift+2	move container to workspace $ws2
+bindsym $mod+Shift+3	move container to workspace $ws3
+bindsym $mod+Shift+4	move container to workspace $ws4
+bindsym $mod+Shift+5	move container to workspace $ws5
+bindsym $mod+Shift+6	move container to workspace $ws6
+bindsym $mod+Shift+7	move container to workspace $ws7
+bindsym $mod+Shift+8	move container to workspace $ws8
+bindsym $mod+Shift+9	move container to workspace $ws9
+bindsym $mod+Shift+0	move container to workspace $ws10
+
+# Workspaces 11-20 with top row letter keys
+bindsym $mod+q			workspace $ws11
+bindsym $mod+w			workspace $ws12
+bindsym $mod+e			workspace $ws13
+bindsym $mod+r			workspace $ws14
+bindsym $mod+t			workspace $ws15
+bindsym $mod+y			workspace $ws16
+bindsym $mod+u			workspace $ws17
+bindsym $mod+i			workspace $ws18
+bindsym $mod+o			workspace $ws19
+bindsym $mod+p			workspace $ws20
+
+# Move containers to workspaces 11-20
+bindsym $mod+Shift+q		move container to workspace $ws11
+bindsym $mod+Shift+w		move container to workspace $ws12
+bindsym $mod+Shift+e		move container to workspace $ws13
+bindsym $mod+Shift+r		move container to workspace $ws14
+bindsym $mod+Shift+t		move container to workspace $ws15
+bindsym $mod+Shift+y		move container to workspace $ws16
+bindsym $mod+Shift+u		move container to workspace $ws17
+bindsym $mod+Shift+i		move container to workspace $ws18
+bindsym $mod+Shift+o		move container to workspace $ws19
+bindsym $mod+Shift+p		move container to workspace $ws20
+
+#bindsym $mod+y exec "emacsclient -e '(make-orgcapture-frame)'&"
+
+
+for_window [class="Pinentry"] sticky enable
+for_window [class="sent"] border pixel 0px
+for_window [class="Blender"] move to workspace $ws6
+#workspace $ws6 gaps inner 0
+#workspace $ws6 gaps outer 0
+for_window [class="marble"] move to workspace $ws7
+for_window [title="GIMP Startup"] move workspace $ws5
+for_window [class="Gimp"] move workspace $ws5
+#workspace $ws5 gaps inner 0
+#workspace $ws5 gaps outer 0
+for_window [window_role="gimp-dock"] floating disable; move left; resize shrink width 50 px or 50ppt
+for_window [window_role="gimp-toolbox"] floating disable; move right; resize grow width 30 px or 30ppt
+for_window [window_role="GtkFileChooserDialog"] resize shrink height 10 px
+for_window [instance="dl"] move workspace $ws10
+
+# First I have a tmux window used for background scripts.
+# I'll later bind this to mod+u.
+for_window [instance="dropdown"] floating enable
+for_window [instance="dropdown"] resize set 625 400
+for_window [instance="dropdown"] move scratchpad
+for_window [instance="dropdown"] border pixel 5
+
+# Runs the tmuxinit script, which searches for an earlier tmux instance,
+# otherwise starts a new one (to prevent multiple dropdown sessions).
+exec --no-startup-id $term -n dropdown -e tmuxinit
+# Runs neofetch on first tmux screen if installed.
+exec_always --no-startup-id "tmux send-keys -t 0:0 'clear && neofetch 2>/dev/null' Enter"
+
+# PDF conversion Script running on startup TODO: consider better way
+#exec --no-startup-id bash /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/@automation_startup.sh
+
+# Launching todo and focus music (in scratchpads) #brainfm #scratchpad #todo
+exec --no-startup-id bash ~/.config/i3/scripts/automation2019.sh
+
+
+#exec --no-startup-id tmux "send-keys -t automation.0 ls ENTER"
+#exec_always "tmux new -s automation -d"
+#exec_always "tmux send -t automation ls ENTER"
+
+# Then I have a window running R I use for basic arithmetic
+# I'll later bind this to mod+a.
+for_window [instance="math"] floating enable
+for_window [instance="math"] resize set 800 300
+for_window [instance="math"] move scratchpad
+for_window [instance="math"] border pixel 5
+exec --no-startup-id $term -n math -f mono:pixelsize=24 -e dropdowncalc
+
+# Bindings to make the webcam float and stick.
+for_window [title="mpvfloat"] floating enable
+for_window [title="mpvfloat"] sticky enable
+for_window [title="mpvfloat"] border pixel 0
+no_focus [title="mpvfloat"]
+
+# #---Function Buttons---# #
+bindsym $mod+F1		exec --no-startup-id mupdf ~/.config/i3/i3_guide.pdf
+bindsym $mod+F2		restart
+bindsym $mod+F3		exec --no-startup-id displayselect
+bindsym $mod+F4		exec --no-startup-id $hibernate
+bindsym $mod+F5		exec --no-startup-id $netrefresh
+bindsym $mod+F6		exec --no-startup-id $term -e transmission-remote-cli
+##bindsym $mod+F7
+##bindsym $mod+F8
+bindsym $mod+F9		exec --no-startup-id dmenumount
+bindsym $mod+F10	exec --no-startup-id dmenuumount
+##bindsym $mod+F11
+##bindsym $mod+F12
+
+
+# #---Arrow Keys---# #
+bindsym $mod+Left		focus left
+bindsym $mod+Down		focus down
+bindsym $mod+Up			focus up
+bindsym $mod+Right 		focus right
+bindsym $mod+Shift+Left		move left
+bindsym $mod+Shift+Down		move down
+bindsym $mod+Shift+Up		move up
+bindsym $mod+Shift+Right 	move right
+
+
+# #---Media Keys---# #
+
+# Volume keys
+#bindsym $mod+plus exec --no-startup-id pactl -- set-sink-volume 0 +5%
+#bindsym $mod+Shift+plus		exec $biginc
+#bindsym $mod+minus exec --no-startup-id pactl -- set-sink-volume 0 -5%
+#bindsym $mod+Shift+minus	exec $bigdec
+#bindsym $mod+less 		exec $prev
+#bindsym $mod+Shift+less		exec $beg
+#bindsym $mod+greater		exec $next
+#bindsym $mod+Shift+greater	exec $next
+
+
+# Volume keys (PC)
+bindsym $mod+plus exec "amixer -q sset Master,0 1+ unmute"
+#/bin/bash -c 'amixer set Master unmute && amixer set Headphone toggle'
+bindsym $mod+Shift+plus		exec $biginc
+bindsym $mod+minus exec "amixer -q sset Master,0 1- unmute"
+bindsym $mod+Shift+minus	exec $bigdec
+bindsym $mod+less 		exec $prev
+bindsym $mod+Shift+less		exec $beg
+bindsym $mod+greater		exec $next
+bindsym $mod+Shift+greater	exec $next
+
+# For advancing forward/backward in an mpd song
+bindsym $mod+bracketleft 	exec $lilbak
+bindsym $mod+Shift+bracketleft 	exec $bigbak
+bindsym $mod+bracketright 	exec $lilfor
+bindsym $mod+Shift+bracketright exec $bigfor
+
+# For screenshots and recording
+#bindsym Print 			exec --no-startup-id scrot
+bindsym Shift+Print 		exec --no-startup-id scrot -u
+bindsym --release Control+Print exec --no-startup-id /home/jakub/screen_images/screenshot_selection.sh
+
+#bindsym $mod+Print		exec --no-startup-id dmenurecord
+#bindsym $mod+Scroll_Lock	exec --no-startup-id "killall screenkey || screenkey"
+#bindsym $mod+Delete		exec $stoprec
+#bindsym XF86Launch1		exec $stoprec & xset dpms force off
+
+# #---Extra XF86 Keys---# #
+# These are the extra media keys that some keyboards have.
+#bindsym XF86AudioMute		exec $mute
+#bindsym XF86AudioLowerVolume	exec $dec
+#bindsym XF86AudioRaiseVolume	exec $inc
+bindsym XF86PowerOff		exec prompt "Are you sure you want to shutdown?" "$shutdown"
+##bindsym XF86Copy		exec
+##bindsym XF86Open		exec
+##bindsym XF86Paste		exec
+##bindsym XF86Cut		exec
+##bindsym XF86MenuKB		exec
+bindsym XF86Calculator		exec $term -e R -q
+bindsym XF86Sleep		exec sudo zzz
+##bindsym XF86WakeUp		exec
+bindsym XF86Explorer		exec $term -e ranger
+##bindsym XF86Send		exec
+##bindsym XF86Xfer		exec
+bindsym XF86WWW			exec --no-startup-id $BROWSER
+##bindsym XF86DOS		exec
+bindsym XF86ScreenSaver		exec --no-startup-id ~/.config/i3/lock.sh
+##bindsym XF86RotateWindows	exec
+##bindsym XF86TaskPane		exec
+##bindsym XF86Favorites		exec
+bindsym XF86MyComputer		exec $term -e ranger
+##bindsym XF86Back		exec
+##bindsym XF86Forward		exec
+bindsym XF86Eject		exec sudo umount -R /mnt
+bindsym XF86AudioNext		exec $next
+bindsym XF86AudioPlay		exec $pause
+bindsym XF86AudioPrev		exec $prev
+bindsym XF86AudioStop		exec $pause
+##bindsym XF86AudioRecord
+bindsym XF86AudioRewind		exec $lilbak
+bindsym XF86AudioForward	exec $lilfor
+##bindsym XF86Phone		exec
+##bindsym XF86Tools		exec
+bindsym XF86HomePage		exec $BROWSER https://lukesmith.xyz
+bindsym XF86Reload		restart
+##bindsym XF86ScrollUp		exec
+##bindsym XF86ScrollDown		exec
+##bindsym XF86New		exec
+##bindsym XF86LaunchA		exec
+##bindsym XF86LaunchB		exec
+##bindsym XF86Launch2		exec
+##bindsym XF86Launch3		exec
+##bindsym XF86Launch4		exec
+##bindsym XF86Launch5		exec
+##bindsym XF86Launch6		exec
+##bindsym XF86Launch7		exec
+##bindsym XF86Launch8		exec
+##bindsym XF86Launch9		exec
+bindsym XF86AudioMicMute	exec $micmute
+##bindsym XF86TouchpadToggle	exec
+bindsym XF86TouchpadOn		exec --no-startup-id exec synclient TouchpadOff=0
+bindsym XF86TouchpadOff		exec --no-startup-id exec synclient TouchpadOff=1
+bindsym XF86Suspend		exec --no-startup-id ~/.config/i3/lock.sh
+bindsym XF86Close		kill
+bindsym XF86WebCam		exec --no-startup-id camtoggle
+bindsym XF86Mail		exec $term -e neomutt
+bindsym XF86Messenger		exec $term -e weechat
+bindsym XF86Search		exec $BROWSER https://duckduckgo.com
+##bindsym XF86Go			exec
+##bindsym XF86Finance		exec
+##bindsym XF86Game		exec
+bindsym XF86Shop		exec $BROWSER https://ebay.com
+#bindsym XF86MonBrightnessDown	exec --no-startup-id xbacklight -dec 15
+#bindsym XF86MonBrightnessUp	exec --no-startup-id xbacklight -inc 15
+#bindsym XF86MonBrightnessUp exec "light -A 20; notify-send 'Brightness (Up)' $(light)'%'"
+#bindsym XF86MonBrightnessDown exec "light -U 20; notify-send 'Brightness (Down)' $(light)'%'"
+
+bindsym XF86MonBrightnessDown exec --no-startup-id light -U 10
+bindsym XF86MonBrightnessUp exec --no-startup-id light -A 10
+
+bindsym XF86AudioMedia		exec $music
+bindsym XF86Display		exec --no-startup-id arandr
+#bindsym XF86KbdLightOnOff	exec
+#bindsym XF86KbdBrightnessDown	exec --no-startup-id python3.6 ~/.i3/kb-lights.py -
+#bindsym XF86KbdBrightnessUp	exec --no-startup-id python3.6 ~/.i3/kb-lights.py +
+##bindsym XF86Reply		exec
+##bindsym XF86MailForward	exec
+##bindsym XF86Save		exec
+bindsym XF86Documents		exec $term -e ranger ~/Documents
+##bindsym XF86Battery		exec
+##bindsym XF86Bluetooth		exec
+bindsym XF86WLAN		exec $netrefresh
+
+## MY MODIFIFACATIONS
+#bindsym XF86MonBrightnessDown	exec --no-startup-id light -U 5
+#bindsym XF86MonBrightnessUp	exec --no-startup-id light -A 5
+
+# Light alternative TODO
+#bindsym XF86MonBrightnessDown	exec --no-startup-id /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/displays/decrease_brightness.sh
+#bindsym XF86MonBrightnessUp	exec --no-startup-id /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/displays/increase_brightness.sh
+
+
+# Pulse Audio controls
+bindsym XF86AudioRaiseVolume exec --no-startup-id pactl -- set-sink-volume 0 +5% #increase sound volume
+bindsym XF86AudioLowerVolume exec --no-startup-id pactl -- set-sink-volume 0 -5% #decrease sound volume
+bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute 0 toggle # mute sound
+
+# Screenshots TODO remove ~
+#bindsym --release Print exec "scrot -m '~/Pictures/screenshots/%s_%H%M_%d.%m.%Y_$wx$h.png'"
+#bindsym --release Shift+Print exec "scrot -s '~/Pictures/screenshots/%s_%H%M_%d%m%Y_$wx$h.png'"
+#bindsym --release $mod+Shift+Print exec "scrot -u -d 4 '~/Pictures/screenshots/%s_%H%M_%d%m%Y_$wx$h.png'"
+
+#TODO: make it user-adaptable
+#bindsym --release Print exec "scrot -m '/home/jakub/Pictures/screenshots/%s_%H%M_%d.%m.%Y_$wx$h.png'"
+bindsym --release Print exec "import png:- | xclip -selection clipboard -t image/png"
+#bindsym --release Shift+Print exec "scrot -s '/home/jakub/Pictures/screenshots/%s_%H%M_%d%m%Y_$wx$h.png'"
+#bindsym --release Shift+Print exec "scrot '%Y-%m-%d_$wx$h.png' -e 'mv $f home/jakub/Pictures/screenshots/'"
+bindsym --release Shift+Print exec "bash /home/jakub/.config/i3/scripts/take-screenshot.bash"
+bindsym --release $mod+Shift+Print exec "scrot -u -d 4 '/home/jakub/Pictures/screenshots/%s_%H%M_%d%m%Y_$wx$h.png'"
+
+# HINTS:
+# For checking key names use the following command:
+# xev -event keyboard
+
+
+# MY MODES
+# Autokey-gtk for simulating arrows under h j k l:
+# https://askubuntu.com/questions/254424/how-can-i-change-what-keys-on-my-keyboard-do-how-can-i-create-custom-keyboard/304834#304834
+
+#######
+# TODO: execute governor's command with sudo
+set $mode_system System (L) lock, (E) logout, (S) suspend, (H) hibernate, (R) reboot, (P) shutdown  |  Power: (k)high (j)low
+mode "$mode_system" {
+    bindsym l exec --no-startup-id i3lock, mode "default"
+    bindsym e exec --no-startup-id i3-msg exit, mode "default"
+    bindsym s exec --no-startup-id systemctl suspend, mode "default"
+    bindsym h exec --no-startup-id systemctl hibernate, mode "default"
+    bindsym r exec --no-startup-id systemctl reboot, mode "default"
+    bindsym p exec --no-startup-id systemctl poweroff, mode "default"
+
+    # please add the following line to the sudoers file (with command: sudo visudo)
+    # jakub ALL=(ALL) NOPASSWD: /usr/bin/cpufreq-set # MAKE SURE TO ADD IT IN THE END!!!
+    #bindsym k exec bash /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/governors/performance.sh, mode "default"
+    bindsym k exec bash ~/.config/i3/scripts/governors/performance.sh, mode "default"
+    bindsym j exec bash ~/.config/i3/scripts/governors/powersave.sh, mode "default"
+
+    # ergodox keyboard setup
+    bindsym d exec bash ~/.config/i3/scripts/ergodox-keyboard.sh, mode "default"
+
+    # back to normal: Enter or Escape
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+Delete mode "$mode_system"
+
+
+#######
+set $mode_launch Launch (c) CLion, (p) PyCharm, (a) Anki, (S) Android [S]tudio, (r) staRt scripts
+mode "$mode_launch" {
+    bindsym c exec bash /home/jakub/.local/share/JetBrains/Toolbox/apps/CLion/ch-0/183.5429.37/bin/clion.sh, mode "default"
+    #bindsym p  exec bash ~/Downloads/pycharm-community-2018.1.4/bin/pycharm.sh, mode "default"
+    bindsym p exec bash /home/jakub/.config/i3/scripts/launch/pycharm.sh, mode "default"
+    #bindsym p exec bash /home/jakub/Dropbox/sync/dotfiles/.config/i3/scripts/launch, mode "default"
+
+
+#/home/jakub/.local/share/JetBrains/Toolbox/apps/PyCharm-P/ch-0/192.6817.19/bin/pycharm.sh
+
+    bindsym a exec GTK_THEME=elementary anki, mode "default"
+    bindsym s exec /home/jakub/Documents/Utils/android-studio/android-studio/bin/studio.sh, mode "default"
+
+    #
+    bindsym m exec spotify --force-device-scale-factor=1.5 %U, mode "default"
+
+    # scripts for scrathpads and other
+    bindsym r exec /home/jakub/Dropbox/sync/dotfiles/.scripts/startup_scripts.sh mode "default"
+
+    # back to normal: Enter or Escape
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+Shift+d mode "$mode_launch"
+
+
+set $mode_books Books: (r)os
+mode "$mode_books" {
+    bindsym r exec zathura home/jakub/Dropbox/@Kindle/@jakub_kindle/programming/@ROS/systematic-approach-learning-robot-programming-ros/ROS_Systematic_Approach.pdf, mode "default"
+    #bindsym p  exec bash ~/Downloads/pycharm-community-2018.1.4/bin/pycharm.sh, mode "default"
+    # back to normal: Enter or Escape
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+Shift+b mode "$mode_books"
+
+#######
+bindsym $mod+space mode "$mode_alternative"
+set $mode_alternative Alternative:
+
+mode "$mode_alternative" {
+    bindsym h workspace $ws1, mode "default"
+    bindsym j workspace $ws2, mode "default"
+    bindsym k workspace $ws3, mode "default"
+    bindsym l workspace $ws4, mode "default"
+    bindsym semicolon workspace $ws5, mode "default"
+
+    # back to normal: Enter or Escape
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+
+#######
+set $displayMode "Set display mode: [l]aptop [h]ome 4[k]new [m]ed  |  Toggle: [c]ompton  |  [0]-[9] Redshift  |  [G]raphics Mode"
+
+mode $displayMode {
+    bindsym w exec --no-startup-id "\
+                ~/.config/i3/scripts/work-displays.sh && \
+                ~/.config/i3/scripts/dpi-96.sh;" \
+                mode "default"
+
+    bindsym c exec bash ~/.config/i3/scripts/compton-toggle.sh; mode "default"
+
+    #bindsym h exec --no-startup-id ~/.config/i3/scripts/displays/home/home.sh; exec source ~/.config/i3/scripts/displays/home/workspaces-to-output.sh; mode "default"
+
+    #bindsym k exec --no-startup-id ~/.config/i3/scripts/displays/home4k/new4.sh; exec xrandr --dpi 220; mode "default"
+    #bindsym 4 exec --no-startup-id ~/.config/i3/scripts/displays/home4k/home4k.sh; exec xrandr --dpi 220; mode "default"
+    bindsym h exec --no-startup-id ~/.config/i3/scripts/displays/home4k/new5.sh; exec source ~/.config/i3/scripts/displays/home4k/workspaces-to-output.sh; exec xrandr --dpi 220; mode "default"
+
+    bindsym Shift+h exec --no-startup-id ~/.config/i3/scripts/displays/home4k/home-pc-4k.sh; exec source ~/.config/i3/scripts/displays/home4k/workspaces-to-output.sh; exec xrandr --dpi 220; mode "default"
+
+    #bindsym k exec --no-startup-id ~/.config/i3/scripts/displays/homeX1_single/homeX1_single.sh; exec xrandr --dpi 220; mode "default"
+    bindsym k exec --no-startup-id ~/.config/i3/scripts/displays/one4k/single_monitor4K.sh; exec xrandr --dpi 220; mode "default"
+
+    bindsym i exec --no-startup-id ~/.config/i3/scripts/displays/one4k/pop_os_27inch_4k_only.sh; exec xrandr --dpi 220; mode "default"
+
+    bindsym j exec --no-startup-id ~/.config/i3/scripts/displays/one4k/HDMI_single_monitor4K.sh; exec xrandr --dpi 220; mode "default"
+
+    bindsym m exec --no-startup-id ~/.config/i3/scripts/displays/MedFusionLab/medfusion.sh; exec xrandr --dpi 220; mode "default"
+
+    bindsym l exec --no-startup-id "\
+                ~/.config/i3/scripts/displays/laptop/laptop.sh && \
+                ~/.config/i3/scripts/dpi-192.sh"; \
+                mode "default"
+
+    bindsym g exec --no-startup-id "\
+                ~/.config/i3/scripts/displays/library/fullHD_multiply.sh && \
+                ~/.config/i3/scripts/dpi-192.sh"; \
+                mode "default"
+
+    bindsym p exec --no-startup-id ~/.scripts/toggle-touchpad.sh
+
+    # Redshift settings
+    bindsym 1 exec $redshift_with_location -x; exec $redshift_with_location -O 2700; mode "default"
+    bindsym 2 exec $redshift_with_location -x; exec $redshift_with_location -O 3000; mode "default"
+    bindsym 3 exec $redshift_with_location -x; exec $redshift_with_location -O 3300; mode "default"
+    bindsym 4 exec $redshift_with_location -x; exec $redshift_with_location -O 3600; mode "default"
+    bindsym 5 exec $redshift_with_location -x; exec $redshift_with_location -O 3900; mode "default"
+    bindsym 6 exec $redshift_with_location -x; exec $redshift_with_location -O 4200; mode "default"
+    bindsym 7 exec $redshift_with_location -x; exec $redshift_with_location -O 4500; mode "default"
+    bindsym 8 exec $redshift_with_location -x; exec $redshift_with_location -O 4800; mode "default"
+    bindsym 9 exec $redshift_with_location -x; exec $redshift_with_location -O 5100; mode "default"
+    bindsym 0 exec $redshift_with_location -x; exec $redshift_with_location -O 5500; mode "default"
+
+    # Graphics card settings: applied after reboot
+    bindsym Shift+g mode $graphicsMode
+
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+} 
+bindsym $mod+s mode $displayMode
+
+# Setting graphics at next startup
+set $graphicsMode "Set graphics mode and restart: [i]ntel [n]vidia"
+mode $graphicsMode {
+    bindsym i exec --no-startup-id "\
+               system76-power graphics intel &&  \
+               reboot"; \
+               mode "default"
+    bindsym n exec --no-startup-id "\
+               system76-power graphics nvidia &&  \
+               reboot"; \
+               mode "default"
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+
+workspace_auto_back_and_forth yes
+hide_edge_borders both
+
+#bindcode --release 108 workspace back_and_forth; exec --no-startup-id xdotool key --clearmodifiers space; focus; exec --no-startup-id i3-msg workspace back_and_forth
+#bindcode --release 108 workspace back_and_forth; exec "xdotool key space"; workspace back_and_forth
+
+# Trajectory Visualizer - move to workspace 4 on laptop screen (for Claude Code screenshots)
+# Match by title (contains TJOTP-3C) or class
+for_window [title=".*TJOTP-3C.*"] move container to workspace $ws4
+for_window [class="TJOTP-3C Trajectory Visualizer"] move container to workspace $ws4
+
+# Bind workspace 4 to laptop screen
+workspace $ws4 output eDP-1-1

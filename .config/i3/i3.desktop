@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=i3
+Comment=This session logs you into i3 on Ubuntu
+Exec=i3
+TryExec=i3
+Icon=
+Type=Application
+DesktopNames=i3
+X-Ubuntu-Gettext-Domain=tilting;wm;windowmanager;window;manager;

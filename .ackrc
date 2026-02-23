@@ -1,0 +1,7 @@
+# --type-add=m:ext:m
+ --type-set=m=.m
+
+#--type-set=m:ext:m
+
+# --type-set=code=.py,.cpp,.launch,.m
+# --type-set=web=.css,.htm,.html,.php,.phtml,.js

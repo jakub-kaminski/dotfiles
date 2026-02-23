@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Get today's date
+year=$(date +%Y)
+month=$(date +%m)
+day=$(date +%d)
+
+# Create the directory path
+dir=~/work/$year/$month/$day
+
+# Create the directory if it doesn't exist
+mkdir -p "$dir"
+
+echo "$dir"
+
+# Change to the directory
+cd "$dir" || exit

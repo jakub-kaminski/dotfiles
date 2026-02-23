@@ -1,0 +1,31 @@
+{
+    "suggest.timeout": 5000,
+    "diagnostic.checkCurrentLine": true,
+    "emmet.includeLanguages": {"markdown": "html"},
+    "emmet.excludeLanguages": [],
+    "python.jediEnabled": true,
+    "python.jediPath": "/home/jakub/.virtualenvs/pipenv-un6GZGol/bin/python3",
+    "python.linting.enabled": false,
+    "list.normalMappings": {
+        "<C-c>": "do:exit"
+    },
+    "list.insertMappings": {
+        "<C-c>": "do:exit"
+    },
+    "languageserver": {
+        "ccls": {
+            "command": "ccls",
+            "filetypes": ["c", "cpp", "objc", "objcpp"],
+            "rootPatterns": [".ccls", "compile_commands.json", ".vim/", ".git/", ".hg/"],
+            "initializationOptions": {
+                "cache": {
+                    "directory": "/tmp/ccls"
+                }
+            }
+        }
+    },
+    "coc.source.vimtex.filetypes": [
+      "tex",
+      "plaintex"
+    ]
+}

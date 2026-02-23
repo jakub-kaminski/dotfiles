@@ -1,0 +1,63 @@
+" Selected IntelliSpace modules "source ~/intelli-space/spacemacs.vim
+"source ~/intelli-space/extra.vim
+"source ~/intelli-space/major.vim
+"source ~/intelli-space/hybrid.vim #+begin_src vimrc
+source ~/.intellimacs/spacemacs.vim
+
+" (Optional) Enable other Intellimacs modules
+source ~/.intellimacs/extra.vim
+source ~/.intellimacs/major.vim
+source ~/.intellimacs/hybrid.vim
+
+" (Optional) Enable which-key plugin
+source ~/.intellimacs/which-key.vim
+
+" (Optional) My own vim commands
+nnoremap Y y$
+
+
+" My own vim commands
+nnoremap Y y$
+
+"set timeout timeoutlen=150 ttimeoutlen=100
+
+"nmap <leader><leader>s :action KJumpAction<cr>
+nmap ,f :action KJumpAction.Word0<cr>
+nmap ,F :action KJumpAction.Line<cr>
+
+" This does not work ****setxkbmap -option ctrl:nocaps
+nmap ,1 :action ActivateProjectToolWindow<CR>
+""vnoremap ,1 <Esc>:action ActivateProjectToolWindow<CR>
+
+nmap ,3 :action RecentFiles<CR>
+""vnoremap ,3 <Esc>:action RecentFiles<CR>
+
+nmap ,e :action RenameElement<cr>
+
+
+" Open current file in neovim
+nmap ,v :action Tool_External Tools_nvim<cr>
+nmap ,r :edit /home/jakub/Dropbox/sync/dotfiles/config_scripts/spacemacs-jetbrains.org<cr>
+"nmap <leader><leader>l :action KJumpAction.Line<cr>
+
+"nnoremap / /\v
+"nnoremap ? ?\v
+
+set ignorecase
+set surround
+set number
+set relativenumber
+set hlsearch incsearch
+set nocompatible
+
+" scrolloff to see below and above text
+set scrolloff=3
+
+"enable copying to externall applications
+"install vim-gui-common package to do it
+"set clipboard=unnamedplus
+set clipboard+=unnamed
+
+
+nnoremap ; :
+vnoremap ; :
