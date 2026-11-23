@@ -1,0 +1,603 @@
+#!/bin/bash
+# Record an MS Teams meeting from Firefox or Chrome and auto-transcribe when it ends.
+#
+# Usage: capture-teams [-b|--brandon] [--only firefox|chrome] [--live [--mic SOURCE] [--full]] [filename]
+#
+# - Finds (or waits for) a Firefox / Chrome audio stream; the browser that plays
+#   first is the one recorded (pick it explicitly with --only)
+# - Records to FLAC via PulseAudio capture sink
+# - Picks up audio streams the browser opens later in the meeting
+# - Monitors streams: auto-stops when meeting ends (streams removed/corked)
+# - Launches transcribe-rj on the recording (passes -b when given); with --live
+#   only when --full is given too
+# - Ctrl+C to stop manually at any time
+#
+# --live  also records your microphone (the one the browser is using, or --mic
+#         SOURCE) into the same file and prints a transcript while the meeting
+#         is running: browser audio is labelled Rob, the microphone Jakub.
+#         Needs the capture-teams-live helper next to this script.
+#         The live transcript is then the result: the full transcribe-rj pass
+#         after the meeting is skipped unless --full is given.
+
+set -euo pipefail
+
+OUTPUT_DIR="$HOME/Music/capture-music"
+SILENCE_TIMEOUT=10  # seconds of corked state before considering meeting over
+GONE_GRACE=3        # seconds with no stream at all before considering meeting over
+                    # (Chrome may drop a stream and open a new one a moment later)
+BRANDON=false
+ONLY=""             # "" = whichever browser plays first, or "firefox" / "chrome"
+LIVE=false
+FULL=false          # with --live: also run transcribe-rj after the meeting
+LIVE_FAILED=false
+MIC_OVERRIDE=""
+LIVE_PYTHON="$HOME/whisperx-env/bin/python"
+LIVE_HELPER="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/capture-teams-live"
+
+USAGE="Usage: capture-teams [-b|--brandon] [--only firefox|chrome] [--live [--mic SOURCE] [--full]] [filename]"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -b|--brandon)
+            BRANDON=true
+            shift
+            ;;
+        --only)
+            ONLY="${2:-}"
+            if [[ "$ONLY" != "firefox" && "$ONLY" != "chrome" ]]; then
+                echo "--only expects 'firefox' or 'chrome'" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        --live)
+            LIVE=true
+            shift
+            ;;
+        --full)
+            FULL=true
+            shift
+            ;;
+        --mic)
+            MIC_OVERRIDE="${2:-}"
+            if [[ -z "$MIC_OVERRIDE" ]]; then
+                echo "--mic expects a PulseAudio source name (see: pactl list short sources)" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        -h|--help)
+            echo "$USAGE"
+            exit 0
+            ;;
+        --)
+            shift; break
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [[ -n "$MIC_OVERRIDE" ]] && ! $LIVE; then
+    echo "--mic only makes sense together with --live" >&2
+    exit 1
+fi
+if $LIVE; then
+    if [[ ! -f "$LIVE_HELPER" ]]; then
+        echo "--live needs the helper script: $LIVE_HELPER" >&2
+        exit 1
+    fi
+    if [[ ! -x "$LIVE_PYTHON" ]]; then
+        echo "--live needs the whisperx environment: $LIVE_PYTHON" >&2
+        exit 1
+    fi
+fi
+
+set_browser_label() {
+    case "$ONLY" in
+        firefox) BROWSER_LABEL="Firefox" ;;
+        chrome)  BROWSER_LABEL="Chrome" ;;
+        *)       BROWSER_LABEL="Firefox/Chrome" ;;
+    esac
+}
+set_browser_label
+
+if $BRANDON; then
+    REMOTE_LABEL="Rob/Brandon"
+else
+    REMOTE_LABEL="Rob"
+fi
+
+SINK_INPUTS=()
+RECORD_PID=""
+LIVE_PID=""
+SUBSCRIBE_PID=""
+CAPTURE_MODULE=""
+CAPTURE_SINK_INDEX=""
+LOOPBACK_MODULE=""
+MIX_MODULE=""
+MIX_REMOTE_MODULE=""
+MIX_MIC_MODULE=""
+OUTPUT_PATH=""
+RESULT_SHOWN=false
+
+# --- Teardown helpers (all safe to call more than once) ---
+stop_recording() {
+    if [[ -n "$RECORD_PID" ]] && kill "$RECORD_PID" 2>/dev/null; then
+        wait "$RECORD_PID" 2>/dev/null || true
+        echo "Recording stopped."
+    fi
+    RECORD_PID=""
+}
+
+stop_live() {
+    # The helper transcribes what is still pending before it exits.
+    if [[ -n "$LIVE_PID" ]] && kill "$LIVE_PID" 2>/dev/null; then
+        wait "$LIVE_PID" 2>/dev/null || true
+    fi
+    LIVE_PID=""
+}
+
+stop_subscribe() {
+    if [[ -n "$SUBSCRIBE_PID" ]] && kill "$SUBSCRIBE_PID" 2>/dev/null; then
+        wait "$SUBSCRIBE_PID" 2>/dev/null || true
+    fi
+    SUBSCRIBE_PID=""
+}
+
+teardown_audio() {
+    local var sid
+    for var in LOOPBACK_MODULE MIX_REMOTE_MODULE MIX_MIC_MODULE; do
+        if [[ -n "${!var}" ]]; then
+            pactl unload-module "${!var}" 2>/dev/null || true
+        fi
+        printf -v "$var" '%s' ""
+    done
+
+    # Restore all streams to default sink
+    for sid in "${SINK_INPUTS[@]}"; do
+        pactl move-sink-input "$sid" @DEFAULT_SINK@ 2>/dev/null || true
+    done
+    SINK_INPUTS=()
+
+    for var in MIX_MODULE CAPTURE_MODULE; do
+        if [[ -n "${!var}" ]]; then
+            pactl unload-module "${!var}" 2>/dev/null || true
+        fi
+        printf -v "$var" '%s' ""
+    done
+}
+
+# Prints the whole seconds of the recording, or nothing if it cannot be read
+recording_duration() {
+    local d
+    d=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$OUTPUT_PATH" 2>/dev/null | cut -d. -f1) || true
+    if [[ "$d" =~ ^[0-9]+$ ]]; then
+        echo "$d"
+    fi
+}
+
+# --- Cleanup on exit (always runs) ---
+cleanup() {
+    # Must run to the end even if the terminal is gone (echo fails -> set -e would
+    # abort here and leave the capture sink loaded) or Ctrl+C is hit again.
+    set +e
+    trap '' PIPE HUP INT TERM
+    echo ""
+    echo "Cleaning up..."
+
+    stop_recording
+    stop_live
+    stop_subscribe
+    teardown_audio
+
+    if ! $RESULT_SHOWN && [[ -n "$OUTPUT_PATH" && -f "$OUTPUT_PATH" ]]; then
+        local size duration
+        size=$(du -h "$OUTPUT_PATH" | cut -f1)
+        duration=$(recording_duration)
+        echo ""
+        if [[ -n "$duration" ]]; then
+            echo "Recording saved: $OUTPUT_PATH ($size, $((duration / 60))m $((duration % 60))s)"
+        else
+            echo "Recording saved: $OUTPUT_PATH ($size)"
+        fi
+    fi
+}
+trap cleanup EXIT
+
+# --- Find browser audio streams ---
+# Firefox: application.name "Firefox" / binary "firefox*".
+# Chrome:  application.name "Google Chrome" / binary "chrome" or "chromium*".
+# Matching Chrome by binary keeps Electron apps (which also call themselves
+# "Chromium") out of the recording.
+BROWSER_AWK='
+    function browser_kind(app, bin) {
+        if (app ~ /[Ff]irefox/ || bin ~ /^firefox/) return "firefox"
+        if (app ~ /Google Chrome/ || bin ~ /^(chrome|chromium|chromium-browser)$/) return "chrome"
+        return ""
+    }
+'
+
+# find_browser_sink_inputs                  -> "<id> <browser>" for each playing
+#                                              stream of the selected browser(s)
+# find_browser_sink_inputs excluded <sink#> -> "<id>" for streams (corked or not) of
+#                                              the browser left out by --only that
+#                                              sit on sink <sink#>
+find_browser_sink_inputs() {
+    pactl list sink-inputs | awk -v only="$ONLY" -v mode="${1:-}" -v onsink="${2:-}" "$BROWSER_AWK"'
+        function emit(    kind) {
+            if (id == "" || seen[id]++) return
+            kind = browser_kind(app, bin)
+            if (kind == "") return
+            if (mode == "excluded") {
+                if (only != "" && kind != only && sink == onsink) print id
+            } else if (corked == "no" && (only == "" || kind == only)) {
+                print id, kind
+            }
+        }
+        /^Sink Input #/ {
+            emit()
+            id=$0; sub(/.*#/, "", id); corked=""; app=""; bin=""; sink=""
+        }
+        $1 == "Sink:"                      { sink=$2 }
+        /Corked: /                         { corked=$2 }
+        /application\.name = /             { app=$0; sub(/.*= "/, "", app); sub(/"$/, "", app) }
+        /application\.process\.binary = /  { bin=$0; sub(/.*= "/, "", bin); sub(/"$/, "", bin) }
+        END { emit() }
+    '
+}
+
+# Name of the microphone the browser records from (a stream that is not
+# paused wins); prints nothing when the browser has no microphone stream.
+find_browser_mic_source() {
+    local idx
+    idx=$(pactl list source-outputs | awk -v only="$ONLY" "$BROWSER_AWK"'
+        function emit(    kind) {
+            if (id == "" || src == "") return
+            kind = browser_kind(app, bin)
+            if (kind == "" || (only != "" && kind != only)) return
+            if (corked == "no" && active == "") active = src
+            if (first == "") first = src
+        }
+        /^Source Output #/ {
+            emit()
+            id=$0; sub(/.*#/, "", id); src=""; corked=""; app=""; bin=""
+        }
+        $1 == "Source:"                    { src=$2 }
+        /Corked: /                         { corked=$2 }
+        /application\.name = /             { app=$0; sub(/.*= "/, "", app); sub(/"$/, "", app) }
+        /application\.process\.binary = /  { bin=$0; sub(/.*= "/, "", bin); sub(/"$/, "", bin) }
+        END {
+            emit()
+            if (active != "") print active
+            else if (first != "") print first
+        }
+    ')
+    if [[ -n "$idx" ]]; then
+        pactl list short sources | awk -v i="$idx" '$1 == i && $2 !~ /\.monitor$/ { print $2 }'
+    fi
+}
+
+# Fills SINK_INPUTS and FOUND_KINDS from the streams playing right now
+scan_browser_streams() {
+    local id kind
+    SINK_INPUTS=()
+    FOUND_KINDS=""
+    while read -r id kind; do
+        SINK_INPUTS+=("$id")
+        if [[ " $FOUND_KINDS" != *" $kind "* ]]; then
+            FOUND_KINDS+="$kind "
+        fi
+    done < <(find_browser_sink_inputs)
+}
+
+# --- Wait for browser audio ---
+echo "Looking for $BROWSER_LABEL audio stream..."
+scan_browser_streams
+
+if [[ ${#SINK_INPUTS[@]} -eq 0 ]]; then
+    echo "No active $BROWSER_LABEL audio found. Waiting... (start your Teams meeting, Ctrl+C to cancel)"
+    while [[ ${#SINK_INPUTS[@]} -eq 0 ]]; do
+        sleep 1
+        scan_browser_streams
+    done
+fi
+
+# Without --only, stay with the browser that is playing: audio the other one
+# starts later must not end up in the recording or keep it running.
+if [[ -z "$ONLY" ]]; then
+    read -ra _kinds <<< "$FOUND_KINDS"
+    if [[ ${#_kinds[@]} -eq 1 ]]; then
+        ONLY="${_kinds[0]}"
+        set_browser_label
+    fi
+fi
+
+echo "Found ${#SINK_INPUTS[@]} $BROWSER_LABEL audio stream(s): ${SINK_INPUTS[*]}"
+
+# --- Output filename ---
+if [[ -n "${1:-}" ]]; then
+    FILENAME="$1"
+else
+    if $BRANDON; then
+        FILENAME="teams3-$(date +%Y%m%d-%H%M%S)"
+    else
+        FILENAME="teams-$(date +%Y%m%d-%H%M%S)"
+    fi
+fi
+[[ "$FILENAME" != *.flac ]] && FILENAME="${FILENAME}.flac"
+OUTPUT_PATH="$OUTPUT_DIR/$FILENAME"
+
+# --- Setup PulseAudio capture ---
+CAPTURE_MODULE=$(pactl load-module module-null-sink sink_name=capture_sink sink_properties=device.description=CaptureSink)
+CAPTURE_SINK_INDEX=$(pactl list short sinks | awk '$2 == "capture_sink" { i=$1 } END { print i }')
+for sid in "${SINK_INPUTS[@]}"; do
+    pactl move-sink-input "$sid" capture_sink 2>/dev/null || true  # stream may have just vanished
+done
+echo "Redirected ${#SINK_INPUTS[@]} stream(s) to capture sink"
+LOOPBACK_MODULE=$(pactl load-module module-loopback source=capture_sink.monitor sink=@DEFAULT_SINK@ latency_msec=1)
+
+RECORD_SOURCE=capture_sink.monitor
+if $LIVE; then
+    # The microphone is mixed with the browser audio in a second sink that is
+    # only recorded, never played back, so you do not hear yourself.
+    if [[ -n "$MIC_OVERRIDE" ]]; then
+        MIC_SOURCE="$MIC_OVERRIDE"
+        MIC_HOW="chosen with --mic"
+    else
+        MIC_SOURCE=$(find_browser_mic_source)
+        MIC_HOW="in use by $BROWSER_LABEL"
+        if [[ -z "$MIC_SOURCE" ]]; then
+            MIC_SOURCE=$(pactl get-default-source)
+            MIC_HOW="system default - $BROWSER_LABEL has no microphone stream open"
+        fi
+    fi
+    MIX_MODULE=$(pactl load-module module-null-sink sink_name=capture_mix sink_properties=device.description=CaptureMix)
+    MIX_REMOTE_MODULE=$(pactl load-module module-loopback source=capture_sink.monitor sink=capture_mix latency_msec=1)
+    MIX_MIC_MODULE=$(pactl load-module module-loopback source="$MIC_SOURCE" sink=capture_mix latency_msec=1)
+    RECORD_SOURCE=capture_mix.monitor
+    echo "Microphone: $MIC_SOURCE ($MIC_HOW)"
+fi
+
+# --- Start recording ---
+# setsid keeps the terminal's Ctrl+C away from ffmpeg: it is stopped once, by
+# us, and so always gets to finish the FLAC file properly.
+parec -d "$RECORD_SOURCE" \
+    --format=float32le \
+    --rate=48000 \
+    --channels=2 \
+    | setsid ffmpeg -f f32le -ar 48000 -ac 2 -i - \
+        -c:a flac -compression_level 8 \
+        "$OUTPUT_PATH" \
+        -y -loglevel warning &
+RECORD_PID=$!
+
+echo ""
+echo "Recording to: $OUTPUT_PATH"
+
+# --- Live transcription ---
+if $LIVE; then
+    LIVE_TRANSCRIPT="${OUTPUT_PATH%.flac}-live.txt"
+    setsid "$LIVE_PYTHON" -u "$LIVE_HELPER" \
+        --remote-source capture_sink.monitor --remote-name "$REMOTE_LABEL" \
+        --mic-source "$MIC_SOURCE" --mic-name Jakub \
+        --out "$LIVE_TRANSCRIPT" &
+    LIVE_PID=$!
+    echo "Live transcript: $LIVE_TRANSCRIPT"
+fi
+
+echo "Meeting in progress... (auto-stops when meeting ends, Ctrl+C to stop manually)"
+echo ""
+
+# --- Monitor for meeting end ---
+# Strategy: use pactl subscribe to watch for sink-input events,
+# then check if our specific sink input is gone or corked.
+MEETING_ENDED=false
+CORK_START=""
+GONE_START=""
+
+# Redirect browser streams that appeared after the recording started
+# (Chrome opens a new stream per tab / audio element, sometimes mid-meeting).
+adopt_new_sink_inputs() {
+    local id _kind sid known
+    while read -r id _kind; do
+        known=false
+        for sid in "${SINK_INPUTS[@]}"; do
+            if [[ "$sid" == "$id" ]]; then
+                known=true
+                break
+            fi
+        done
+        if ! $known && pactl move-sink-input "$id" capture_sink 2>/dev/null; then
+            SINK_INPUTS+=("$id")
+            echo "Picked up new audio stream: $id"
+        fi
+    done < <(find_browser_sink_inputs)
+}
+
+# The other browser can still end up in the recording: WirePlumber remembers the
+# last sink per application and routes that browser's new streams into
+# capture_sink while it exists. Send those back to the default sink.
+evict_excluded_sink_inputs() {
+    [[ -n "$ONLY" && -n "$CAPTURE_SINK_INDEX" ]] || return 0
+    local id
+    while IFS= read -r id; do
+        if pactl move-sink-input "$id" @DEFAULT_SINK@ 2>/dev/null; then
+            echo "Kept other browser's stream out of the recording: $id"
+        fi
+    done < <(find_browser_sink_inputs excluded "$CAPTURE_SINK_INDEX")
+}
+
+check_any_sink_input_alive() {
+    # Returns 0 if any tracked sink input is active, 1 if all gone, 2 if all corked
+    local any_exists=false
+    local any_active=false
+
+    for sid in "${SINK_INPUTS[@]}"; do
+        local state
+        state=$(pactl list sink-inputs 2>/dev/null | awk -v target="$sid" '
+            /^Sink Input #/ { id=$0; sub(/.*#/, "", id); corked="" }
+            /Corked: /       { corked=$2 }
+            corked != "" && id == target { print corked; exit }
+        ')
+        if [[ -n "$state" ]]; then
+            any_exists=true
+            if [[ "$state" == "no" ]]; then
+                any_active=true
+            fi
+        fi
+    done
+
+    if ! $any_exists; then
+        return 1  # all streams gone
+    elif $any_active; then
+        return 0  # at least one is playing
+    else
+        return 2  # all corked
+    fi
+}
+
+# Subscribe to PulseAudio events and filter for sink-input changes.
+# The FIFO stays open in this shell for the whole loop: reopening it for every
+# read leaves gaps with no reader, grep then dies of SIGPIPE on its next write
+# and the loop silently turns into a slow poll.
+FIFO=$(mktemp -u /tmp/capture-teams-fifo-XXXXXX)
+mkfifo "$FIFO"
+exec {EVFD}<>"$FIFO"
+rm -f "$FIFO"
+
+# $! is pactl here, so killing it also ends grep (EOF) and nothing is left behind.
+pactl subscribe 2>/dev/null > >(grep --line-buffered "sink-input" >&"$EVFD") &
+SUBSCRIBE_PID=$!
+
+# Read events and check stream state
+POLL=5
+while read -r -t "$POLL" -u "$EVFD" _line || true; do
+    # One stream creation emits several events; handle a burst in one pass
+    for _i in {1..100}; do
+        read -r -t 0.05 -u "$EVFD" _line || break
+    done
+
+    # Check if recording process is still alive
+    if ! kill -0 "$RECORD_PID" 2>/dev/null; then
+        echo "Recording process ended unexpectedly."
+        break
+    fi
+
+    if [[ -n "$LIVE_PID" ]] && ! kill -0 "$LIVE_PID" 2>/dev/null; then
+        echo "Live transcription stopped unexpectedly; the recording continues."
+        LIVE_PID=""
+        LIVE_FAILED=true
+    fi
+
+    adopt_new_sink_inputs
+    evict_excluded_sink_inputs
+
+    # Check our sink input (|| true to prevent set -e from exiting)
+    check_any_sink_input_alive && STATUS=0 || STATUS=$?
+
+    if [[ $STATUS -eq 1 ]]; then
+        # All streams removed — meeting over unless a replacement shows up
+        CORK_START=""
+        POLL=1
+        if [[ -z "$GONE_START" ]]; then
+            GONE_START=$(date +%s)
+        elif (( $(date +%s) - GONE_START >= GONE_GRACE )); then
+            echo "Meeting ended (audio stream removed)."
+            MEETING_ENDED=true
+            break
+        fi
+    elif [[ $STATUS -eq 2 ]]; then
+        # Stream corked — might be temporary pause or meeting end
+        GONE_START=""
+        POLL=1
+        if [[ -z "$CORK_START" ]]; then
+            CORK_START=$(date +%s)
+            echo "Audio paused, waiting ${SILENCE_TIMEOUT}s to confirm meeting ended..."
+        else
+            ELAPSED=$(( $(date +%s) - CORK_START ))
+            if [[ $ELAPSED -ge $SILENCE_TIMEOUT ]]; then
+                echo "Meeting ended (audio paused for ${SILENCE_TIMEOUT}s)."
+                MEETING_ENDED=true
+                break
+            fi
+        fi
+    else
+        # Stream active again — reset timers
+        GONE_START=""
+        POLL=5
+        if [[ -n "$CORK_START" ]]; then
+            echo "Audio resumed."
+            CORK_START=""
+        fi
+    fi
+done
+
+# Close the event fifo (already unlinked)
+exec {EVFD}>&-
+
+# Stop everything and put the audio routing back before transcription
+if [[ -n "$LIVE_PID" ]] && ! kill -0 "$LIVE_PID" 2>/dev/null; then
+    LIVE_FAILED=true
+fi
+stop_subscribe
+stop_recording
+stop_live
+teardown_audio
+
+# --- Show recording result ---
+if [[ -f "$OUTPUT_PATH" ]]; then
+    SIZE=$(du -h "$OUTPUT_PATH" | cut -f1)
+    DURATION=$(recording_duration)
+    RESULT_SHOWN=true
+    if [[ -n "$DURATION" && "$DURATION" -gt 0 ]]; then
+        D_MIN=$((DURATION / 60))
+        D_SEC=$((DURATION % 60))
+        echo ""
+        echo "Recording saved: $OUTPUT_PATH ($SIZE, ${D_MIN}m ${D_SEC}s)"
+    else
+        echo "Recording may be empty (0 duration). Skipping transcription."
+        exit 0
+    fi
+else
+    echo "Error: No recording file produced."
+    exit 1
+fi
+
+if $LIVE && [[ -s "$LIVE_TRANSCRIPT" ]]; then
+    echo "Live transcript saved: $LIVE_TRANSCRIPT"
+fi
+
+# With --live the live transcript is the result; the full pass is opt-in.
+# If the live transcription broke down, fall back to the full pass.
+if $LIVE && ! $FULL; then
+    if $LIVE_FAILED; then
+        echo "Live transcription did not finish - running the full transcription instead."
+    else
+        echo ""
+        echo "Done! Full transcription skipped (use --full, or run: transcribe-rj \"$OUTPUT_PATH\")"
+        exit 0
+    fi
+fi
+
+# --- Auto-transcribe ---
+TRANSCRIPT_PATH="${OUTPUT_PATH%.flac}-transcript.txt"
+echo ""
+echo "Starting transcription..."
+echo "Output: $TRANSCRIPT_PATH"
+echo ""
+
+# Run transcription: progress goes to stderr (terminal), transcript to stdout.
+if $BRANDON; then
+    transcribe-rj --brandon "$OUTPUT_PATH" | tee "$TRANSCRIPT_PATH"
+else
+    transcribe-rj "$OUTPUT_PATH" | tee "$TRANSCRIPT_PATH"
+fi
+
+echo ""
+echo "Done! Transcript saved to: $TRANSCRIPT_PATH"

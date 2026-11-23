@@ -1,0 +1,59 @@
+#!/bin/bash
+# i3blocks indicator for the Kleinanzeigen watcher.
+# FontAwesome binoculars icon: gray when idle, orange with count when there
+# are new finds, red on scan error / stale scans (>1 h).
+# Left-click: acknowledge (reset counter).
+# Right-click: open the recent finds in the browser (new ones, or last 3).
+# Middle-click: show the raw hit feed in a terminal.
+
+BASE="$HOME/Documents/kleinanzeigen-search"
+STATE="$BASE/state/state.json"
+HITS="$BASE/state/hits.jsonl"
+PY="$BASE/.venv/bin/python"
+ICON=$(printf '')  # fa-binoculars
+
+open_recent() {
+    local n
+    n=$(python3 -c "import json;print(json.load(open('$STATE')).get('new_count',0))" 2>/dev/null)
+    [ -z "$n" ] || [ "$n" -lt 1 ] && n=3
+    [ -f "$HITS" ] || return
+    tail -n "$n" "$HITS" | python3 -c "
+import json, sys
+for line in sys.stdin:
+    print(json.loads(line)['url'])" | while read -r url; do
+        xdg-open "$url" >/dev/null 2>&1 &
+    done
+}
+
+case "$BLOCK_BUTTON" in
+    1) "$PY" "$BASE/ka_watch.py" ack ;;
+    2) i3-sensible-terminal -e sh -c "tail -n 50 '$HITS'; exec $SHELL" & ;;
+    3) open_recent ;;
+esac
+
+if [ ! -f "$STATE" ]; then
+    echo "<span font_family='FontAwesome' foreground='#666666'>$ICON</span> ?"
+    exit 0
+fi
+
+read -r COUNT ERR AGE <<EOF
+$(python3 - "$STATE" <<'PYEOF'
+import json, sys, time, datetime
+s = json.load(open(sys.argv[1]))
+last = s.get("last_scan")
+age = 9e9
+if last:
+    dt = datetime.datetime.fromisoformat(last)
+    age = time.time() - dt.timestamp()
+print(s.get("new_count", 0), 1 if s.get("last_error") else 0, int(age))
+PYEOF
+)
+EOF
+
+if [ "$ERR" = "1" ] || [ "$AGE" -gt 3600 ]; then
+    echo "<span font_family='FontAwesome' foreground='#FF5555'>$ICON</span><span foreground='#FF5555'> !</span>"
+elif [ "$COUNT" -gt 0 ]; then
+    echo "<span font_family='FontAwesome' foreground='#FFAA00'>$ICON</span><span foreground='#FFAA00' weight='bold'> $COUNT</span>"
+else
+    echo "<span font_family='FontAwesome' foreground='#888888'>$ICON</span>"
+fi

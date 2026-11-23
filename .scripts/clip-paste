@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# clip-paste — THE single "paste" entry point. Prints the clipboard to stdout.
+#
+#   * Local X11 (DISPLAY set)  -> read the real selection. Wrapped in `timeout`
+#                                 so a hung selection owner can never freeze the
+#                                 caller (this is why nvim used to stall at start).
+#   * Remote / no DISPLAY      -> the local clipboard can't be read back over OSC 52
+#                                 (READ is blocked for security), so fall back to
+#                                 the cache written by clip-copy on THIS host. That
+#                                 keeps copy->paste consistent within a remote box.
+#
+# Usage:  clip-paste [--primary|--clipboard]   (default: clipboard)
+set -u
+
+sel="clipboard"
+case "${1-}" in
+  --primary)   sel="primary";   shift ;;
+  --clipboard) sel="clipboard"; shift ;;
+esac
+
+if [ -n "${DISPLAY-}" ] && command -v xclip >/dev/null 2>&1; then
+  if out=$(timeout 1 xclip -o -selection "$sel" 2>/dev/null); then
+    printf '%s' "$out"
+    exit 0
+  fi
+fi
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/clip"
+[ -f "$cache_dir/last" ] && cat "$cache_dir/last" || true

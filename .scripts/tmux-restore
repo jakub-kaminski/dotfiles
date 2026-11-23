@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Restore tmux sessions and resume Claude conversations from the latest snapshot (tmux-snap).
+#   tmux-restore                      show this help + a dry run of everything
+#   tmux-restore --go --only '2'      restore one session (shell glob on the session name)
+#   tmux-restore --go                 restore everything (throttled, 6 s between Claude starts)
+# Full instructions: ~/RESTORE-TMUX-CLAUDE.md
+set -euo pipefail
+R="$HOME/Documents/tmux-snapshots/latest/restore.sh"
+if [ ! -x "$R" ]; then
+  echo "No snapshot found at $R - take one with: tmux-snap" >&2
+  exit 1
+fi
+if [ $# -eq 0 ]; then
+  sed -n '1,/^## 3/p' "$HOME/RESTORE-TMUX-CLAUDE.md" 2>/dev/null | head -60
+  echo "---- dry run (nothing is started) ----"
+  exec "$R"
+fi
+exec "$R" "$@"

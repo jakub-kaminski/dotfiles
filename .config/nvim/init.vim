@@ -25,6 +25,7 @@ endif
 set rtp+=/usr/local/opt/fzf "TODO: not full name?
 
 let g:python_host_prog = '/usr/bin/python'
+let g:python3_host_prog = '/home/jakub/.virtualenvs/nvim-provider/bin/python'
 " Other example virtualenvs setups:
 "let g:python3_host_prog = '/home/jakub/.virtualenvs/nvim3-KZb6yFWR/bin/python'
 "let g:python3_host_prog = 'python3'
@@ -99,6 +100,31 @@ set hlsearch incsearch
 
 set clipboard=unnamedplus
 
+" Unified clipboard: route ALL nvim yanks/pastes through the clip bridge
+" (~/.scripts/clip-copy / clip-paste) — the single source of truth shared with
+" tmux, vim and the shell. Locally it writes the X11 selection(s) via xclip; on a
+" remote/no-DISPLAY session it falls back to OSC 52, so a yank inside remote nvim
+" still lands in your LOCAL machine's clipboard. The '+' (yank) copy writes BOTH
+" selections so a yank is pasteable via Ctrl+V *and* middle-click. The paste side
+" is timeout-guarded inside clip-paste so a wedged X11 selection owner can never
+" freeze nvim at startup (the original reason this block exists; 2026-06-05).
+let s:clip_copy  = expand('~/.scripts/clip-copy')
+let s:clip_paste = expand('~/.scripts/clip-paste')
+if executable(s:clip_copy)
+  let g:clipboard = {
+    \   'name': 'clip-bridge',
+    \   'copy': {
+    \     '+': [s:clip_copy],
+    \     '*': [s:clip_copy, '--primary'],
+    \   },
+    \   'paste': {
+    \     '+': [s:clip_paste, '--clipboard'],
+    \     '*': [s:clip_paste, '--primary'],
+    \   },
+    \   'cache_enabled': 0,
+    \ }
+endif
+
 set t_Co=256  "TODO: possibly move to the end?
 
 "TODO: understand the underlying concept
@@ -148,6 +174,7 @@ Plug 'michaeljsmith/vim-indent-object'
 
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 "Plug 'neoclide/coc.nvim', {'do': 'yarn install --frozen-lockfile'} "
+let g:coc_start_at_startup = 0  " disabled while debugging :wq hang
 
 Plug 'metakirby5/codi.vim'
 
@@ -170,7 +197,7 @@ Plug 'ConradIrwin/vim-bracketed-paste'
 
 " Syntax highlighting
 "Plug 'sheerun/vim-polyglot' "TODO: possibly replace
-Plug 'numirias/semshi', {'do': ':UpdateRemotePlugins'} "Syntax highlighting for Python
+Plug 'wookayin/semshi', {'do': ':UpdateRemotePlugins'} "Syntax highlighting for Python (maintained fork)
 
 Plug 'easymotion/vim-easymotion' "nicer jumping in normal mode
 Plug 'justinmk/vim-sneak' " minimalist alternative to vim-easymotion
@@ -741,7 +768,7 @@ let g:ale_open_list = 1
 let g:ale_set_signs = 1
 
 "source /home/jakub/.vim/colors/darcula_jtk.vim "TODO: relocate it or install as a plugin?
-source /home/jakub/.config/nvim/colors/darcula_jtk.vim "TODO: relocate it or install as a plugin?
+source ~/.config/nvim/colors/darcula_jtk.vim "TODO: relocate it or install as a plugin?
 
 " 'junegunn/limelight.vim'
 let g:limelight_conceal_ctermfg = 245  " Solarized Base1
@@ -2297,3 +2324,6 @@ for _, pattern in ipairs(claude_log_patterns) do
   })
 end
 EOF
+
+" Suppress F9 in insert mode (used by voxtype push-to-talk)
+inoremap <F9> <Nop>

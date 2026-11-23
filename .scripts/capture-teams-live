@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+"""Live transcription helper for `capture-teams --live`.
+
+Captures two PulseAudio sources separately - the browser audio (remote side
+of the meeting) and the microphone (local side) - cuts each one into
+utterances at pauses and transcribes them with faster-whisper while the
+meeting is still running. The speaker label comes from the channel the
+speech arrived on, so no diarization is needed.
+
+Transcript lines go to stdout and to --out; progress goes to stderr.
+Stop with SIGTERM / SIGINT: pending speech is transcribed before exit.
+
+Run with the whisperx-env python (needs faster-whisper and numpy).
+"""
+
+import argparse
+import collections
+import os
+import queue
+import signal
+import subprocess
+import sys
+import threading
+import time
+
+import numpy as np
+
+RATE = 16000
+FRAME = 480                  # samples per frame (30 ms)
+FRAME_S = FRAME / RATE
+
+PRE_ROLL_FRAMES = 10         # audio kept from before the detected speech start
+START_WINDOW = 5             # speech starts when START_VOICED of the last
+START_VOICED = 3             #   START_WINDOW frames are above the threshold
+END_SILENCE_FRAMES = 23      # ~0.7 s pause ends an utterance
+SOFT_MAX_S = 12.0            # past this length a short pause is enough to cut
+SOFT_END_SILENCE_FRAMES = 7  # ~0.2 s
+HARD_MAX_S = 25.0            # forced cut
+MIN_VOICED_FRAMES = 8        # shorter bursts are dropped (clicks, key presses)
+
+ABS_FLOOR_DB = -50.0         # never treat anything quieter than this as speech
+NOISE_MARGIN_DB = 10.0       # speech must exceed the tracked noise floor by this
+NOISE_RISE_DB = 0.02         # noise floor rise per frame (~0.7 dB/s)
+
+
+def log(msg=""):
+    print(msg, file=sys.stderr, flush=True)
+
+
+def fmt_time(seconds):
+    m, s = divmod(int(max(seconds, 0)), 60)
+    return f"{m:02d}:{s:02d}"
+
+
+class Segmenter:
+    """Energy-based utterance splitter for one audio stream."""
+
+    def __init__(self):
+        self.noise_db = -60.0
+        self.pre_roll = collections.deque(maxlen=PRE_ROLL_FRAMES)
+        self.recent = collections.deque(maxlen=START_WINDOW)
+        self.frames = []          # frames of the utterance being collected
+        self.in_speech = False
+        self.silence_run = 0
+        self.voiced = 0
+        self.start_frame = 0
+        self.index = 0            # frames seen so far
+
+    def _finish(self):
+        frames, voiced, start = self.frames, self.voiced, self.start_frame
+        self.frames = []
+        self.in_speech = False
+        self.silence_run = 0
+        self.voiced = 0
+        self.recent.clear()
+        if voiced < MIN_VOICED_FRAMES:
+            return None
+        audio = np.concatenate(frames).astype(np.float32) / 32768.0
+        return start * FRAME_S, audio
+
+    def feed(self, frame):
+        """Feed one int16 frame; returns (start_s, float32 audio) or None."""
+        self.index += 1
+        rms = np.sqrt(np.mean(np.square(frame.astype(np.float32)))) / 32768.0
+        level = 20.0 * np.log10(max(rms, 1e-6))
+
+        if level < self.noise_db:
+            self.noise_db = max(level, -90.0)
+        else:
+            self.noise_db += NOISE_RISE_DB
+        is_voiced = level > max(ABS_FLOOR_DB, self.noise_db + NOISE_MARGIN_DB)
+
+        if not self.in_speech:
+            self.recent.append(is_voiced)
+            if sum(self.recent) >= START_VOICED:
+                self.in_speech = True
+                self.frames = list(self.pre_roll) + [frame]
+                self.start_frame = self.index - len(self.frames)
+                self.voiced = sum(self.recent)
+                self.silence_run = 0
+                self.pre_roll.clear()
+            else:
+                self.pre_roll.append(frame)
+            return None
+
+        self.frames.append(frame)
+        if is_voiced:
+            self.voiced += 1
+            self.silence_run = 0
+        else:
+            self.silence_run += 1
+
+        length_s = len(self.frames) * FRAME_S
+        if self.silence_run >= END_SILENCE_FRAMES:
+            return self._finish()
+        if length_s >= SOFT_MAX_S and self.silence_run >= SOFT_END_SILENCE_FRAMES:
+            return self._finish()
+        if length_s >= HARD_MAX_S:
+            return self._finish()
+        return None
+
+    def flush(self):
+        """Return the utterance in progress, if any (used at shutdown)."""
+        if self.in_speech:
+            return self._finish()
+        return None
+
+
+def capture(source, name, t0, jobs, stop, procs):
+    """Read one source with parec and queue utterances for transcription."""
+    cmd = [
+        "parec", "-d", source,
+        "--format=s16le", f"--rate={RATE}", "--channels=1",
+        "--latency-msec=30",
+        "--client-name=capture-teams-live",
+        f"--stream-name=live transcription ({name})",
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        log(f"[live] Cannot start parec for {name}: {exc}")
+        return
+    procs.append(proc)
+    offset = time.time() - t0
+    seg = Segmenter()
+    nbytes = FRAME * 2
+    while not stop.is_set():
+        data = proc.stdout.read(nbytes)
+        if len(data) < nbytes:
+            break
+        utt = seg.feed(np.frombuffer(data, dtype=np.int16))
+        if utt is not None:
+            jobs.put((name, offset + utt[0], utt[1]))
+    utt = seg.flush()
+    if utt is not None:
+        jobs.put((name, offset + utt[0], utt[1]))
+    if not stop.is_set():
+        log(f"[live] Audio capture for {name} ended ({source}).")
+
+
+def load_model(model_name, device, threads):
+    """Returns (model, device actually used).
+
+    On the GPU an utterance takes well under a second; on the CPU the same
+    model needs several seconds, so "auto" tries the GPU first.
+    """
+    from faster_whisper import WhisperModel
+
+    devices = ["cuda", "cpu"] if device == "auto" else [device]
+    error = None
+    for dev in devices:
+        kwargs = dict(device=dev, compute_type="int8")
+        if dev == "cpu":
+            kwargs["cpu_threads"] = threads
+        # Prefer the local cache so a meeting never waits on the network.
+        for local_only in (True, False):
+            try:
+                return WhisperModel(model_name, local_files_only=local_only, **kwargs), dev
+            except Exception as exc:
+                error = exc
+        log(f"[live] Model does not load on {dev}: {error}")
+    raise error
+
+
+def transcribe(model, audio, language):
+    segments, _info = model.transcribe(
+        audio,
+        language=language,
+        beam_size=5,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+        condition_on_previous_text=False,
+        without_timestamps=True,
+    )
+    parts = []
+    for seg in segments:
+        # Drop the usual Whisper hallucinations on noise / silence.
+        if seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0:
+            continue
+        text = seg.text.strip()
+        if text:
+            parts.append(text)
+    return " ".join(parts)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--remote-source", required=True, help="PulseAudio source with the browser audio")
+    ap.add_argument("--mic-source", required=True, help="PulseAudio source of the microphone")
+    ap.add_argument("--remote-name", default="Rob")
+    ap.add_argument("--mic-name", default="Jakub")
+    ap.add_argument("--out", required=True, help="file the live transcript is appended to")
+    ap.add_argument("--model", default="turbo")
+    ap.add_argument("--language", default="en")
+    ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
+    ap.add_argument("--threads", type=int, default=16, help="CPU threads when running on the CPU")
+    args = ap.parse_args()
+
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    t0 = time.time()
+    jobs = queue.Queue()
+    procs = []
+    streams = [(args.remote_source, args.remote_name), (args.mic_source, args.mic_name)]
+    readers = [
+        threading.Thread(target=capture, args=(src, name, t0, jobs, stop, procs), daemon=True)
+        for src, name in streams
+    ]
+    # Start capturing first: speech during model loading is queued, not lost.
+    for r in readers:
+        r.start()
+
+    log(f"[live] {args.remote_name}: {args.remote_source}")
+    log(f"[live] {args.mic_name}: {args.mic_source}")
+    log(f"[live] Loading model '{args.model}'...")
+    t_load = time.time()
+    try:
+        model, device = load_model(args.model, args.device, args.threads)
+    except Exception:
+        log("[live] No model could be loaded - live transcription is off.")
+        stop.set()
+        for p in procs:
+            p.terminate()
+        return 1
+    log(f"[live] Model ready on {device} in {time.time() - t_load:.1f}s - live transcript: {args.out}")
+
+    out = open(args.out, "a", encoding="utf-8")
+    warned_lag = 0.0
+
+    def handle(job):
+        nonlocal warned_lag
+        name, start_s, audio = job
+        end_s = start_s + len(audio) / RATE
+        try:
+            text = transcribe(model, audio, args.language)
+        except Exception as exc:  # keep the meeting going whatever happens
+            log(f"[live] Transcription error: {exc}")
+            return
+        if not text:
+            return
+        line = f"[{name}] {fmt_time(start_s)} - {fmt_time(end_s)}  {text}"
+        print(line, flush=True)
+        out.write(line + "\n")
+        out.flush()
+        lag = (time.time() - t0) - end_s
+        if lag > 20 and time.time() - warned_lag > 60:
+            warned_lag = time.time()
+            log(f"[live] Transcription is {lag:.0f}s behind the meeting.")
+
+    parent = os.getppid()
+    while not stop.is_set():
+        try:
+            handle(jobs.get(timeout=0.5))
+        except queue.Empty:
+            if not any(r.is_alive() for r in readers):
+                break
+        if os.getppid() != parent:
+            # capture-teams is gone without stopping us: do not linger.
+            break
+
+    # Shutdown: stop the captures, then transcribe whatever is still pending.
+    stop.set()
+    for p in procs:
+        p.terminate()
+    for r in readers:
+        r.join(timeout=5)
+    pending = jobs.qsize()
+    if pending:
+        log(f"[live] Finishing {pending} pending utterance(s)...")
+    while True:
+        try:
+            handle(jobs.get_nowait())
+        except queue.Empty:
+            break
+    out.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

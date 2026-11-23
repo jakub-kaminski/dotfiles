@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# clip-copy — THE single "copy" entry point. Everything (tmux, nvim, vim, zsh)
+# pipes text here and it lands in the one true clipboard, auto-routing by env:
+#
+#   * Local X11 (DISPLAY set)  -> xclip into the real X11 selection(s)
+#   * Remote / no DISPLAY      -> OSC 52 escape to the controlling terminal, which
+#                                 travels back through ssh + tmux to your LOCAL
+#                                 machine's clipboard.
+#
+# It also mirrors the value into a tiny cache file so clip-paste stays consistent
+# on a headless remote (where the local clipboard can't be read back — OSC 52
+# READ is blocked for security).
+#
+# Usage:  printf %s "text" | clip-copy [--primary|--clipboard]
+#   (no flag)    -> write BOTH primary and clipboard (so a yank is pasteable via
+#                   Ctrl+V *and* middle-click). This is the "everywhere" default.
+#   --primary    -> only the PRIMARY selection (nvim/vim '*' register)
+#   --clipboard  -> only the CLIPBOARD selection (nvim/vim '+' register, explicit)
+set -eu
+
+target="both"
+case "${1-}" in
+  --primary)   target="primary";   shift ;;
+  --clipboard) target="clipboard"; shift ;;
+esac
+
+# Read payload from stdin (or file args).
+buf=$(cat "$@")
+
+# Always mirror to the cache (cheap; used as the remote paste fallback).
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/clip"
+mkdir -p "$cache_dir" 2>/dev/null || true
+printf '%s' "$buf" >"$cache_dir/last" 2>/dev/null || true
+
+# ---- Local X11: write the real selection(s) and we're done. ----
+if [ -n "${DISPLAY-}" ] && command -v xclip >/dev/null 2>&1; then
+  # xclip forks a child that serves the selection until another app claims it,
+  # and that child inherits our stdout/stderr. A caller that waits for EOF on
+  # our output (tmux run-shell, $(...), vim system()) would hang until the next
+  # copy. Detach xclip from our stdio so we return as soon as it owns the
+  # selection.
+  case "$target" in
+    primary)   printf '%s' "$buf" | xclip -selection primary   >/dev/null 2>&1 ;;
+    clipboard) printf '%s' "$buf" | xclip -selection clipboard >/dev/null 2>&1 ;;
+    both)      printf '%s' "$buf" | xclip -selection primary   >/dev/null 2>&1
+               printf '%s' "$buf" | xclip -selection clipboard >/dev/null 2>&1 ;;
+  esac
+  exit 0
+fi
+
+# ---- Remote / no display: OSC 52 to the controlling terminal. ----
+# Base64 the payload (capped at OSC 52's safe max of 74994 raw bytes).
+maxlen=74994
+buflen=$(printf %s "$buf" | wc -c)
+if [ "$buflen" -gt "$maxlen" ]; then
+  printf 'clip-copy: input %d bytes too long for OSC 52, truncating\n' \
+    "$((buflen - maxlen))" >&2
+fi
+b64=$(printf %s "$buf" | head -c "$maxlen" | base64 | tr -d '\r\n')
+esc="\033]52;c;${b64}\a"
+
+# Wrap in tmux's DCS passthrough whenever the escape must traverse a tmux (either
+# we're inside tmux now, or we're remote and the bytes will hit the LOCAL tmux
+# after ssh). The outermost tmux strips the wrapper and re-emits bare OSC 52 to
+# the terminal emulator, which writes the X11 clipboard.
+if [ -n "${TMUX-}" ] || [ -n "${SSH_TTY-}" ]; then
+  esc="\033Ptmux;\033${esc}\033\\"
+fi
+
+# Pick the tty to write the escape to:
+#   remote  -> SSH_TTY (bypasses the remote tmux, hits the local one over ssh)
+#   local   -> the active tmux pane's tty, else the controlling terminal
+if [ -n "${SSH_TTY-}" ]; then
+  target_tty="$SSH_TTY"
+elif [ -n "${TMUX-}" ] && command -v tmux >/dev/null 2>&1; then
+  target_tty=$(tmux list-panes -F "#{pane_active} #{pane_tty}" 2>/dev/null \
+                 | awk '$1=="1"{print $2; exit}')
+else
+  target_tty="/dev/tty"
+fi
+
+printf "$esc" >"${target_tty:-/dev/tty}" 2>/dev/null || printf "$esc" >/dev/tty

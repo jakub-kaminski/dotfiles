@@ -1,0 +1,7 @@
+# Minimal i3 config for agent virtual displays
+# Each instance uses its own IPC socket based on display number
+
+font pango:monospace 10
+default_orientation horizontal
+workspace_layout default
+for_window [class="^.*"] border pixel 1

@@ -51,6 +51,9 @@ This function should only modify configuration layer settings."
      helm
      lsp
      dap
+     (c-c++ :variables
+            c-c++-backend 'lsp-ccls
+            c-c++-lsp-enable-semantic-highlight 'rainbow)
      myleetcode
      ;; debug
      ;;markdown
@@ -492,7 +495,7 @@ It should only modify the values of Spacemacs settings."
    ;; List of search tool executable names. Spacemacs uses the first installed
    ;; tool of the list. Supported tools are `rg', `ag', `pt', `ack' and `grep'.
    ;; (default '("rg" "ag" "pt" "ack" "grep"))
-   dotspacemacs-search-tools '("rg" "ag" "pt" "ack" "grep")
+   dotspacemacs-search-tools '("rg" "ag" "ack" "grep")
 
    ;; Format specification for setting the frame title.
    ;; %a - the `abbreviated-file-name', or `buffer-name'
@@ -1251,6 +1254,94 @@ If you are unsure, try setting them in `dotspacemacs/user-config' first."
     )
   ;; Additional convenient keybinding
   (global-set-key (kbd "C-c C-'") 'claude-code-ide-toggle)
+
+  (with-eval-after-load 'gdb-mi
+    (evilified-state-evilify-map gdb-frames-mode-map
+      :mode gdb-frames-mode)
+    (evilified-state-evilify-map gdb-breakpoints-mode-map
+      :mode gdb-breakpoints-mode)
+    (evilified-state-evilify-map gdb-locals-mode-map
+      :mode gdb-locals-mode)
+    (evilified-state-evilify-map gdb-threads-mode-map
+      :mode gdb-threads-mode)
+    (dolist (hook '(gdb-frames-mode-hook
+                    gdb-breakpoints-mode-hook
+                    gdb-locals-mode-hook
+                    gdb-threads-mode-hook
+                    gdb-disassembly-mode-hook
+                    gdb-memory-mode-hook
+                    gdb-registers-mode-hook))
+      (add-hook hook 'evil-evilified-state)))
+
+  ;; GUD / dap dispatchers: SPC d ... calls the GUD function when
+  ;; gud-minor-mode is active in the current buffer, otherwise the
+  ;; corresponding dap function. This overrides the dap layer's
+  ;; default SPC d bindings with ones that work for both debuggers.
+  (defmacro spacemacs//define-debug-dispatcher (name gud-fn dap-fn)
+    `(defun ,name ()
+       (interactive)
+       (cond
+        ((bound-and-true-p gud-minor-mode) (call-interactively ',gud-fn))
+        ((fboundp ',dap-fn) (call-interactively ',dap-fn))
+        (t (user-error "No active debugger for %s" ',name)))))
+
+  (spacemacs//define-debug-dispatcher spacemacs/debug-continue       gud-cont    dap-continue)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-step-in        gud-step    dap-step-in)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-step-over      gud-next    dap-next)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-step-out       gud-finish  dap-step-out)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-breakpoint     gud-break   dap-breakpoint-toggle)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-remove-break   gud-remove  dap-breakpoint-delete)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-eval           gud-print   dap-eval)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-frame-up       gud-up      dap-up-stack-frame)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-frame-down     gud-down    dap-down-stack-frame)
+  (spacemacs//define-debug-dispatcher spacemacs/debug-run            gud-run     dap-debug-last)
+
+  (defun spacemacs/debug-goto-current ()
+    "Jump to the source line where execution is currently paused."
+    (interactive)
+    (cond
+     ((and (bound-and-true-p gud-minor-mode) gud-last-frame)
+      (let ((file (car gud-last-frame))
+            (line (cdr gud-last-frame)))
+        (find-file file)
+        (goto-char (point-min))
+        (forward-line (1- line))
+        (recenter)))
+     ((bound-and-true-p dap-mode)
+      (when (fboundp 'dap-ui-refresh-cursor)
+        (dap-ui-refresh-cursor)))
+     (t (user-error "No active debug session"))))
+
+  ;; Auto-clear the inferior I/O buffer each time gud-run restarts the program,
+  ;; so program output doesn't pile up across runs.
+  (defun spacemacs//clear-gdb-io-buffers (&rest _)
+    (dolist (buf (buffer-list))
+      (when (eq (buffer-local-value 'major-mode buf) 'gdb-inferior-io-mode)
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer))))))
+  (advice-add 'gud-run :before #'spacemacs//clear-gdb-io-buffers)
+
+  (with-eval-after-load 'dap-mode
+    (spacemacs/set-leader-keys
+      "dc"  'spacemacs/debug-continue
+      "di"  'spacemacs/debug-step-in
+      "do"  'spacemacs/debug-step-over
+      "dO"  'spacemacs/debug-step-out
+      "dbb" 'spacemacs/debug-breakpoint
+      "dbd" 'spacemacs/debug-remove-break
+      "de"  'spacemacs/debug-eval
+      "dfu" 'spacemacs/debug-frame-up
+      "dfd" 'spacemacs/debug-frame-down
+      "dr"  'spacemacs/debug-run
+      "dg"  'spacemacs/debug-goto-current))
+
+  ;; Ensure LSP auto-starts in C/C++ buffers via ccls.
+  ;; The c-c++ layer alone doesn't always wire this up on boot.
+  (with-eval-after-load 'ccls
+    (add-hook 'c-mode-hook 'lsp-deferred)
+    (add-hook 'c++-mode-hook 'lsp-deferred)
+    (add-hook 'objc-mode-hook 'lsp-deferred))
 
   )
 

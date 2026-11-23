@@ -1,0 +1,1 @@
+/home/jakub/Documents/my-utils/voxtype/voxtype-lang-switch.sh

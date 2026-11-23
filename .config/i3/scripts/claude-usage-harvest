@@ -1,0 +1,62 @@
+#!/bin/sh
+# claude-usage-harvest — Claude Code statusLine command (ToS-clean usage capture).
+#
+# Claude Code pipes a JSON status payload to a statusLine command on stdin; for
+# Pro/Max it includes a `rate_limits` object:
+#     .rate_limits.five_hour.{used_percentage, resets_at}
+#     .rate_limits.seven_day.{used_percentage, resets_at}     (resets_at = epoch s)
+#
+# We (1) cache that object so the i3 `claude-usage` block can render it, and
+# (2) print a short status line for the Claude Code TUI.
+#
+# This reads ONLY what the official client hands us on stdin — no token, no curl,
+# no endpoint, no User-Agent spoof. Nothing here touches the network. That is what
+# makes it ToS-clean, unlike the old /api/oauth/usage poll.
+#
+# Optional arg $1 = account label; when set, also writes by-account/<label>.json
+# (for future multi-account aggregation).
+
+LABEL="$1"
+# When run as a statusLine command, auto-label by the account's config dir so the
+# same command works in every profile (skip the default ~/.claude and _session).
+if [ -z "$LABEL" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    _b=$(basename "$CLAUDE_CONFIG_DIR")
+    case "$_b" in .*|_*) : ;; *) LABEL="$_b" ;; esac
+fi
+CACHE_DIR="$HOME/.cache/claude-usage"
+SHARED="$CACHE_DIR/rate_limits.json"
+mkdir -p "$CACHE_DIR" 2>/dev/null
+
+input=$(cat)
+command -v jq >/dev/null 2>&1 || { printf 'claude\n'; exit 0; }
+
+# Merge the new windows over the last-known cache (each window may be
+# independently absent), and emit nothing when there is no rate_limit data at all
+# — so we never clobber a good cache with empties. Written atomically.
+prev=$(cat "$SHARED" 2>/dev/null); [ -n "$prev" ] || prev='{}'
+obj=$(printf '%s' "$input" | jq -c --argjson p "$prev" '
+    (.rate_limits.five_hour // $p.five_hour) as $f
+  | (.rate_limits.seven_day // $p.seven_day) as $s
+  | if ($f == null and $s == null) then empty
+    else {five_hour: $f, seven_day: $s, cached_at: (now | floor)} end
+' 2>/dev/null)
+if [ -n "$obj" ]; then
+    tmp="$SHARED.tmp.$$"
+    printf '%s' "$obj" > "$tmp" 2>/dev/null && mv -f "$tmp" "$SHARED" 2>/dev/null
+    if [ -n "$LABEL" ]; then
+        mkdir -p "$CACHE_DIR/by-account" 2>/dev/null
+        printf '%s' "$obj" > "$CACHE_DIR/by-account/$LABEL.json" 2>/dev/null
+    fi
+fi
+
+# Compact status line for the Claude Code TUI.
+line=$(printf '%s' "$input" | jq -r '
+    (.model.display_name // "claude") as $m
+  | (.rate_limits.five_hour.used_percentage // null) as $a
+  | (.rate_limits.seven_day.used_percentage // null) as $b
+  | $m
+    + (if $a != null then "  5h " + ($a | floor | tostring) + "%" else "" end)
+    + (if $b != null then "  7d " + ($b | floor | tostring) + "%" else "" end)
+' 2>/dev/null)
+[ -n "$line" ] || line="claude"
+printf '%s\n' "$line"

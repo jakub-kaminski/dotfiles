@@ -11,3 +11,11 @@
 *.pyo
 *.swp
 .tmux/plugins/
+__pycache__/
+*.bak
+*.bak-*
+*.bak.*
+*.bak-*/
+.config/i3/config.bak*
+# runtime state written by voxtype-lang, not configuration
+.config/voxtype/language

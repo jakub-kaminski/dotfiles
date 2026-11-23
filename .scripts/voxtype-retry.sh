@@ -1,0 +1,1 @@
+/home/jakub/Documents/voxtype-remote/laptop/voxtype-retry.sh

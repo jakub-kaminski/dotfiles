@@ -23,4 +23,7 @@ LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libexpat.so
 export PATH
 export  GOPATH
 export PATH="/usr/bin:$PATH"
-. "$HOME/.cargo/env"
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+export PATH="$HOME/develop/flutter/bin:$PATH"
+export ANDROID_HOME=$HOME/Android/Sdk
+export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH

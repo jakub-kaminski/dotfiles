@@ -47,6 +47,123 @@ set $ws18 "18"
 set $ws19 "19"
 set $ws20 "20"
 
+# Side workspaces (secondary screen)
+set $ws1s "s1"
+set $ws2s "s2"
+set $ws3s "s3"
+set $ws4s "s4"
+set $ws5s "s5"
+set $ws6s "s6"
+set $ws7s "s7"
+set $ws8s "s8"
+set $ws9s "s9"
+set $ws10s "s10"
+set $ws11s "s11"
+set $ws12s "s12"
+set $ws13s "s13"
+set $ws14s "s14"
+set $ws15s "s15"
+set $ws16s "s16"
+set $ws17s "s17"
+set $ws18s "s18"
+set $ws19s "s19"
+set $ws20s "s20"
+
+# Auto-move application windows to side workspaces
+for_window [title="^Tool Engagement Simulator"] move container to workspace $ws16s
+
+# Auto-move agent virtual displays to side workspaces
+# Title: "agent s<N> - TigerVNC" on creation, renamed to "agent s<N>" by script
+for_window [title="^agent s1( |$)"] move container to workspace $ws1s
+for_window [title="^agent s2( |$)"] move container to workspace $ws2s
+for_window [title="^agent s3( |$)"] move container to workspace $ws3s
+for_window [title="^agent s4( |$)"] move container to workspace $ws4s
+for_window [title="^agent s5( |$)"] move container to workspace $ws5s
+for_window [title="^agent s6( |$)"] move container to workspace $ws6s
+for_window [title="^agent s7( |$)"] move container to workspace $ws7s
+for_window [title="^agent s8( |$)"] move container to workspace $ws8s
+for_window [title="^agent s9( |$)"] move container to workspace $ws9s
+for_window [title="^agent s10( |$)"] move container to workspace $ws10s
+for_window [title="^agent s11( |$)"] move container to workspace $ws11s
+for_window [title="^agent s12( |$)"] move container to workspace $ws12s
+for_window [title="^agent s13( |$)"] move container to workspace $ws13s
+for_window [title="^agent s14( |$)"] move container to workspace $ws14s
+for_window [title="^agent s15( |$)"] move container to workspace $ws15s
+for_window [title="^agent s16( |$)"] move container to workspace $ws16s
+for_window [title="^agent s17( |$)"] move container to workspace $ws17s
+for_window [title="^agent s18( |$)"] move container to workspace $ws18s
+for_window [title="^agent s19( |$)"] move container to workspace $ws19s
+for_window [title="^agent s20( |$)"] move container to workspace $ws20s
+# >>> opus-vm screen (managed by ~/Documents/opus-vm/03-host-integration.sh) >>>
+for_window [class="(?i)tigervnc" title="opus-vm"] move container to workspace $ws19s
+# <<< opus-vm screen <<<
+
+# gpu-box (192.168.1.142) :0 GNOME desktop over VNC -> always lands fullscreen on s2.
+# Matched by title (NOT a blanket TigerVNC class match) so it never collides with the
+# "agent sN" viewers above. Launcher waits for the VNC port and passes
+# -FullscreenSystemKeys=0 so i3 keybindings ($mod+h etc.) work over the VNC.
+for_window [class="TigerVNC Viewer" title="^supermicro:0"] move container to workspace $ws2s, floating disable, fullscreen enable
+exec --no-startup-id ~/.config/i3/scripts/gpu-box-gnome-vnc.sh
+
+# gmktec (gmktec.local / 192.168.1.161) :1 virtual 4K Xvnc -> fullscreen on s18.
+# Title = the Xvnc -desktop name ("WHB04B-6 demo"); if the gmktec server is ever
+# relaunched under a different desktop name, update this match. Launcher passes
+# -FullscreenSystemKeys=0 so i3 keybindings ($mod+h/$mod+l) stay on the host.
+for_window [class="TigerVNC Viewer" title="^WHB04B-6"] move container to workspace $ws18s, floating disable, fullscreen enable
+exec --no-startup-id ~/.config/i3/scripts/gmktec-vnc.sh
+
+# Display outputs — change these when switching monitors
+set $output_main DP-0
+set $output_side HDMI-0
+
+# Workspace output assignments
+workspace _expo output $output_main
+workspace s_expo output $output_side
+
+# Primary workspaces
+workspace $ws1 output $output_main
+workspace $ws2 output $output_main
+workspace $ws3 output $output_main
+workspace $ws4 output $output_main
+workspace $ws5 output $output_main
+workspace $ws6 output $output_main
+workspace $ws7 output $output_main
+workspace $ws8 output $output_main
+workspace $ws9 output $output_main
+workspace $ws10 output $output_main
+workspace $ws11 output $output_main
+workspace $ws12 output $output_main
+workspace $ws13 output $output_main
+workspace $ws14 output $output_main
+workspace $ws15 output $output_main
+workspace $ws16 output $output_main
+workspace $ws17 output $output_main
+workspace $ws18 output $output_main
+workspace $ws19 output $output_main
+workspace $ws20 output $output_main
+
+# Side workspaces
+workspace $ws1s output $output_side
+workspace $ws2s output $output_side
+workspace $ws3s output $output_side
+workspace $ws4s output $output_side
+workspace $ws5s output $output_side
+workspace $ws6s output $output_side
+workspace $ws7s output $output_side
+workspace $ws8s output $output_side
+workspace $ws9s output $output_side
+workspace $ws10s output $output_side
+workspace $ws11s output $output_side
+workspace $ws12s output $output_side
+workspace $ws13s output $output_side
+workspace $ws14s output $output_side
+workspace $ws15s output $output_side
+workspace $ws16s output $output_side
+workspace $ws17s output $output_side
+workspace $ws18s output $output_side
+workspace $ws19s output $output_side
+workspace $ws20s output $output_side
+
 ###########################
 # ---Basic Definitions--- #
 ###########################
@@ -96,11 +213,19 @@ set $hibernate sudo systemctl suspend
 # ---Starting External Scripts on Startup--- #
 ##############################################
 
+# Load X resources (clipboard stack depends on the OSC 52 xterm setting in
+# ~/.Xresources — disallowedWindowOps with SetSelection allowed). lightdm's
+# /etc/X11/Xsession.d hook already merges this at login; this is a dotfiles-tracked
+# belt-and-suspenders so OSC 52 copy survives reboots independent of distro files.
+exec_always --no-startup-id xrdb -merge ~/.Xresources
+
 # Set CPU cores to performance
 exec --no-startup-id bash /home/jakub/Dropbox/sync/homedir/.config/i3/scripts/governors/performance.sh
 
-# Initial config
-exec --no-startup-id ~/.config/i3/scripts/displays/home-4k-DP.sh
+# Default screen layout (dual 4K: DP-0 + HDMI-0) -- set via arandr
+exec --no-startup-id ~/.screenlayout/my-new-screenlayout-2x4k.sh
+# Old layout, kept for the display-switch mode below but no longer autostarted
+#exec --no-startup-id ~/.config/i3/scripts/displays/home-4k-DP.sh
 # Scalling and workspace outputs
 exec --no-startup-id xrandr --dpi 220;
 
@@ -111,8 +236,8 @@ exec_always feh --bg-scale /home/jakub/.wallpapers/wallpaper-3.jpg
 #Graphic Tablet conditional setup
 exec --no-startup-id bash ~/.scripts/graphic-tablet
 
-# Redshift temperature
-exec --no-startup-id $redshift_with_location -x; exec --no-startup-id $redshift_with_location -O 3900;
+# Color temperature + gamma (3900K warm, gamma 1.0:1.2:1.4, full brightness)
+exec --no-startup-id python3 ~/.scripts/set_gamma_ramp.py 3900 1.0 1.2 1.4 1.0
 
 #Turn off touchpad
 exec --no-startup-id exec synclient TouchpadOff=1
@@ -121,14 +246,17 @@ exec --no-startup-id exec synclient TouchpadOff=1
 #exec_always compton -f
 #exec_always compton --config /home/jakub/.config/compton.conf
 
-# Target config
-exec --no-startup-id ~/.config/i3/scripts/displays/MedFusionLab/medfusion.sh
+# Target config (disabled: it overrode the default layout at startup; still reachable via the display-switch mode)
+#exec --no-startup-id ~/.config/i3/scripts/displays/MedFusionLab/medfusion.sh
 
-#Redshift: make screen more red
-exec --no-startup-id redshift -l 55.0:15.0 -O 4500
+#Redshift: make screen more red (disabled - conflicts with line above)
+#exec --no-startup-id redshift -l 55.0:15.0 -O 4500
 
 # Autokey for keybindings remapping
 exec --no-startup-id autokey-gtk
+
+# Kleinanzeigen watcher tray icon (Renishaw/Blum finds, scans every 15 min)
+exec --no-startup-id python3 /home/jakub/Documents/kleinanzeigen-search/ka_watch_tray.py
 
 # Configure keyboard
 exec --no-startup-id bash /home/jakub/.config/i3/scripts/keyboard.sh
@@ -139,12 +267,15 @@ exec --no-startup-id bash ~/.profile
 # Udiskie for automount
  exec --no-startup-id udiskie -ans &
 
+# Allow the paper-vault container (runs as root) to open captcha windows on X
+exec --no-startup-id xhost +local:root
+
 # Scripts for pdf conversions to Kindle-friendly formats
 #exec --no-startup-id bash home/jakub/Dropbox/@Kindle/scripts/1columnProcessing.sh
 #exec --no-startup-id bash home/jakub/Dropbox/@Kindle/scripts/2columnProcessing.sh
 
-# Dropbox
-exec --no-startup-id dropbox start
+# Dropbox (snixembed bridges its StatusNotifier tray icon into i3bar's XEmbed tray)
+exec --no-startup-id sh -c 'snixembed & sleep 1; dropbox start'
 # Google Drive
 exec --no-startup-id insync start
 
@@ -154,8 +285,17 @@ exec --no-startup-id ~/.scripts/remaps
 exec --no-startup-id unclutter
 #Network Manager applet
 exec --no-startup-id nm-applet
+
+# Issue recorder tray icon (click to start/stop recording)
+exec --no-startup-id /home/jakub/.scripts/issue-record-tray.py
 #ActivityWatch: tracking time spent in apps
 exec --no-startup-id "/home/jakub/.config/i3/scripts/activity-watch-startup.sh"
+#Voxtype push-to-talk daemon (standalone USB MICROPHONE, F9 hotkey)
+exec --no-startup-id /home/jakub/.scripts/voxtype-start.sh
+#greenclip: clipboard-history daemon (feeds the $mod+Shift+c rofi picker). It
+#watches the X11 CLIPBOARD, which clip-copy writes to — so every copy from
+#tmux/nvim/vim/shell/browser (and remote copies arriving via OSC 52) is recorded.
+exec_always --no-startup-id sh -c 'pgrep -x greenclip >/dev/null || /home/jakub/.local/bin/greenclip daemon'
 
 
 # Consider this hint: for_window [class="Evince"] move container to workspace "5: doc", workspace "5: doc", focus
@@ -180,6 +320,10 @@ for_window [class="^Processed Image$"] move container to workspace $ws4
 # Rviz windows (ROS)
 assign [class="rviz"] $ws2 #it does work
 
+# ng-sim CNC simulator -> side workspace s3
+assign [class="(?i)ngsim"] $ws3s
+for_window [class="(?i)ngsim"] move container to workspace $ws3s
+
 # Figures Matplotlib
 assign [class="Matplotlib"] $ws2 #it does work
 
@@ -203,9 +347,7 @@ for_window [class="Anki"][title="Browse.+"] move container to workspace $ws8
 
 # Paper writing
 #for_window [class="Zotero"][title="Quick Format Citation"] move container to workspace $ws7
-#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0, fullscreen enable
-#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0, fullscreen enable
-for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, scratchpad show, resize set 1920 1080, border pixel 0, move position center
+#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0#for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, resize set 1920 1080, border pixel 0for_window [class="Zotero"][title="Quick Format Citation"] move scratchpad, scratchpad show, resize set 1920 1080, border pixel 0, move position center
 
 # Music
 for_window [class="Spotify"] move container to workspace $ws10
@@ -213,9 +355,7 @@ for_window [class="Spotify"] move container to workspace $ws10
 # Opening files from JetBrains IDE in NeoVIM instance for quick edit
 #for_window [class="XTerm"][title="VIM-IDE"] move container to workspace $ws9, border pixel 0
 #for_window [class="XTerm"][title="VIM-IDE"] border pixel 0
-for_window [class="XTerm"][title="VIM-IDE"] move scratchpad, resize set 3840 2160, border pixel 0, fullscreen enable
-for_window [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center, fullscreen enable
-#bindsym $mod+t [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center, fullscreen toggle
+for_window [class="XTerm"][title="VIM-IDE"] move scratchpad, resize set 3840 2160, border pixel 0for_window [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center#bindsym $mod+t [class="XTerm"][title="VIM-IDE"] scratchpad show, resize set 3840 2160, move position center, fullscreen toggle
 # TODO: Scratchpad
 
 # tmc
@@ -376,8 +516,9 @@ bindsym $mod+d exec rofi -modi drun -show drun -opacity "85" -bg "#dddddd" -fg "
 #bindsym $mod+d exec rofi -show drun -lines 5 -eh 2 -width 100 -padding 100 -opacity "80" -bw 0 -bc "$base01" -bg "$base02" -fg "$base07" -hlbg "$base05" -columns 2 -font "System San Francisco Display 28" -hlfg "#9575cd"
 #bindsym $mod+Shift+d		gaps inner current set 0; gaps outer current set 0
 
-bindsym $mod+f			fullscreen toggle
-##bindsym $mod+Shift+f
+bindsym $mod+f			exec --no-startup-id "killall -s SIGUSR1 i3expod"
+# $mod+f triggers the expo signal AND switches to the expo workspace pair
+bindsym $mod+Shift+f		fullscreen toggle
 
 #bindsym $mod+g			workspace prev
 # bindsym $mod+Shift+g		exec --no-startup-id gimp; workspace $ws5
@@ -401,7 +542,8 @@ bindsym $mod+x			exec --no-startup-id ~/.config/i3/lock.sh
 bindsym $mod+Shift+x		exec prompt "Are you sure you want to shutdown?" "$shutdown"
 
 bindsym $mod+c			exec --no-startup-id camtoggle
-##bindsym $mod+Shift+c
+#Clipboard history picker: greenclip history in rofi; pick an entry to load it into the clipboard
+bindsym $mod+Shift+c		exec --no-startup-id rofi -modi "clipboard:/home/jakub/.local/bin/greenclip print" -show clipboard -run-command '{cmd}'
 
 bindsym $mod+v			exec $term -e ncmpcpp -s visualizer
 bindsym $mod+Shift+v		exec projectM-pulseaudio
@@ -417,9 +559,9 @@ bindsym $mod+Shift+m		exec $mute
 
 
 # #---Workspace Bindings---# #
-bindsym $mod+Home		workspace $ws1
+bindsym $mod+Home		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 1
 bindsym $mod+Shift+Home		move container to workspace $ws1
-bindsym $mod+End		workspace $ws10
+bindsym $mod+End		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 10
 bindsym $mod+Shift+End		move container to workspace $ws10
 bindsym $mod+Prior		workspace prev
 bindsym $mod+Shift+Prior	move container to workspace prev
@@ -437,17 +579,17 @@ bindsym $mod+Shift+slash	kill
 bindsym $mod+Control+q		kill
 bindsym $mod+backslash		workspace back_and_forth
 
-# switch to workspace
-bindsym $mod+1		workspace $ws1; bar mode dock;
-bindsym $mod+2		workspace $ws2; bar mode dock;
-bindsym $mod+3		workspace $ws3; bar mode dock;
-bindsym $mod+4		workspace $ws4; bar mode dock;
-bindsym $mod+5		workspace $ws5; bar mode dock;
-bindsym $mod+6		workspace $ws6; bar mode dock;
-bindsym $mod+7		workspace $ws7; bar mode dock;
-bindsym $mod+8		workspace $ws8; bar mode dock;
-bindsym $mod+9		workspace $ws9; bar mode dock;
-bindsym $mod+0		workspace $ws10; bar mode dock;
+# switch to workspace (primary + side screen, with back-and-forth)
+bindsym $mod+1		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 1; bar mode dock;
+bindsym $mod+2		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 2; bar mode dock;
+bindsym $mod+3		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 3; bar mode dock;
+bindsym $mod+4		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 4; bar mode dock;
+bindsym $mod+5		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 5; bar mode dock;
+bindsym $mod+6		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 6; bar mode dock;
+bindsym $mod+7		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 7; bar mode dock;
+bindsym $mod+8		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 8; bar mode dock;
+bindsym $mod+9		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 9; bar mode dock;
+bindsym $mod+0		exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 10; bar mode dock;
 
 # move focused container to workspace
 bindsym $mod+Shift+1	move container to workspace $ws1
@@ -461,17 +603,17 @@ bindsym $mod+Shift+8	move container to workspace $ws8
 bindsym $mod+Shift+9	move container to workspace $ws9
 bindsym $mod+Shift+0	move container to workspace $ws10
 
-# Workspaces 11-20 with top row letter keys
-bindsym $mod+q			workspace $ws11
-bindsym $mod+w			workspace $ws12
-bindsym $mod+e			workspace $ws13
-bindsym $mod+r			workspace $ws14
-bindsym $mod+t			workspace $ws15
-bindsym $mod+y			workspace $ws16
-bindsym $mod+u			workspace $ws17
-bindsym $mod+i			workspace $ws18
-bindsym $mod+o			workspace $ws19
-bindsym $mod+p			workspace $ws20
+# Workspaces 11-20 with top row letter keys (primary + side screen, with back-and-forth)
+bindsym $mod+q			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 11
+bindsym $mod+w			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 12
+bindsym $mod+e			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 13
+bindsym $mod+r			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 14
+bindsym $mod+t			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 15
+bindsym $mod+y			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 16
+bindsym $mod+u			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 17
+bindsym $mod+i			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 18
+bindsym $mod+o			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 19
+bindsym $mod+p			exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 20
 
 # Move containers to workspaces 11-20
 bindsym $mod+Shift+q		move container to workspace $ws11
@@ -541,6 +683,9 @@ for_window [title="mpvfloat"] sticky enable
 for_window [title="mpvfloat"] border pixel 0
 no_focus [title="mpvfloat"]
 
+# TMC agent popup (xterm launched with -class TMCAgent, e.g. Ctrl-G in TMC).
+for_window [class="TMCAgent"] floating enable, resize set 900 520, move position center
+
 # #---Function Buttons---# #
 bindsym $mod+F1		exec --no-startup-id mupdf ~/.config/i3/i3_guide.pdf
 bindsym $mod+F2		restart
@@ -548,12 +693,24 @@ bindsym $mod+F3		exec --no-startup-id displayselect
 bindsym $mod+F4		exec --no-startup-id $hibernate
 bindsym $mod+F5		exec --no-startup-id $netrefresh
 bindsym $mod+F6		exec --no-startup-id $term -e transmission-remote-cli
-##bindsym $mod+F7
-##bindsym $mod+F8
-bindsym $mod+F9		exec --no-startup-id dmenumount
+bindsym $mod+F7		exec --no-startup-id ~/.scripts/issue-record.sh start
+bindsym $mod+F8		exec --no-startup-id ~/.scripts/issue-record.sh stop
+bindsym $mod+F9		exec --no-startup-id /home/jakub/screen_images/scripts/screenshot_hdmi.sh
+bindsym Shift+F10	exec --no-startup-id /home/jakub/screen_images/scripts/screenshot_output.sh DP-0 /home/jakub/screen_images/dp-screens
 bindsym $mod+F10	exec --no-startup-id dmenuumount
-##bindsym $mod+F11
+bindsym $mod+F11	exec --no-startup-id ~/.config/i3/scripts/agent-display-menu.sh
 ##bindsym $mod+F12
+# >>> slide-dictate (deck15/slideaudio) >>>
+# Free-speech dictation per presentation slide -> ~/Documents/tormach/planner-pitch/slides-audio/ (see its README.md)
+bindsym $mod+F12		exec --no-startup-id /home/jakub/.scripts/slide-dictate toggle
+bindsym $mod+Shift+F12	exec --no-startup-id /home/jakub/.scripts/slide-dictate stop
+# <<< slide-dictate <<<
+# >>> voxtype-lang >>>
+# rofi menu: language of F9 dictation (English / Polski / auto / default).
+# Not an F9 combination on purpose: VoxType reads F9 itself and would start
+# recording. Also in the $mod+d launcher as "Voxtype Language".
+bindsym $mod+Shift+F10	exec --no-startup-id /home/jakub/.local/bin/voxtype-lang menu
+# <<< voxtype-lang <<<
 
 
 # #---Arrow Keys---# #
@@ -597,10 +754,15 @@ bindsym $mod+Shift+bracketleft 	exec $bigbak
 bindsym $mod+bracketright 	exec $lilfor
 bindsym $mod+Shift+bracketright exec $bigfor
 
+# Screen recording (ffmpeg)
+bindsym Control+F9		exec --no-startup-id python3 ~/.scripts/screen-record.py start
+bindsym Control+Shift+F9	exec --no-startup-id python3 ~/.scripts/screen-record.py stop
+bindsym Control+$mod+F9	exec --no-startup-id python3 ~/.scripts/screen-record.py setup
+
 # For screenshots and recording
 #bindsym Print 			exec --no-startup-id scrot
 bindsym Shift+Print 		exec --no-startup-id scrot -u
-bindsym --release Control+Print exec --no-startup-id /home/jakub/screen_images/screenshot_selection.sh
+bindsym --release Control+Print exec --no-startup-id /home/jakub/screen_images/scripts/screenshot_selection.sh
 
 #bindsym $mod+Print		exec --no-startup-id dmenurecord
 #bindsym $mod+Scroll_Lock	exec --no-startup-id "killall screenkey || screenkey"
@@ -780,7 +942,7 @@ mode "$mode_launch" {
     bindsym Return mode "default"
     bindsym Escape mode "default"
 }
-bindsym $mod+Shift+d mode "$mode_launch"
+bindsym $mod+Shift+d exec --no-startup-id ~/.config/i3/scripts/agent-display-menu.sh
 
 
 set $mode_books Books: (r)os
@@ -798,11 +960,11 @@ bindsym $mod+space mode "$mode_alternative"
 set $mode_alternative Alternative:
 
 mode "$mode_alternative" {
-    bindsym h workspace $ws1, mode "default"
-    bindsym j workspace $ws2, mode "default"
-    bindsym k workspace $ws3, mode "default"
-    bindsym l workspace $ws4, mode "default"
-    bindsym semicolon workspace $ws5, mode "default"
+    bindsym h exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 1; mode "default"
+    bindsym j exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 2; mode "default"
+    bindsym k exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 3; mode "default"
+    bindsym l exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 4; mode "default"
+    bindsym semicolon exec --no-startup-id ~/.config/i3/scripts/workspace-pair.sh 5; mode "default"
 
     # back to normal: Enter or Escape
     bindsym Return mode "default"
@@ -849,17 +1011,17 @@ mode $displayMode {
 
     bindsym p exec --no-startup-id ~/.scripts/toggle-touchpad.sh
 
-    # Redshift settings
-    bindsym 1 exec $redshift_with_location -x; exec $redshift_with_location -O 2700; mode "default"
-    bindsym 2 exec $redshift_with_location -x; exec $redshift_with_location -O 3000; mode "default"
-    bindsym 3 exec $redshift_with_location -x; exec $redshift_with_location -O 3300; mode "default"
-    bindsym 4 exec $redshift_with_location -x; exec $redshift_with_location -O 3600; mode "default"
-    bindsym 5 exec $redshift_with_location -x; exec $redshift_with_location -O 3900; mode "default"
-    bindsym 6 exec $redshift_with_location -x; exec $redshift_with_location -O 4200; mode "default"
-    bindsym 7 exec $redshift_with_location -x; exec $redshift_with_location -O 4500; mode "default"
-    bindsym 8 exec $redshift_with_location -x; exec $redshift_with_location -O 4800; mode "default"
-    bindsym 9 exec $redshift_with_location -x; exec $redshift_with_location -O 5100; mode "default"
-    bindsym 0 exec $redshift_with_location -x; exec $redshift_with_location -O 5500; mode "default"
+    # Color temperature keybindings (gamma 1.0:1.2:1.4 preserved, full brightness)
+    bindsym 1 exec python3 ~/.scripts/set_gamma_ramp.py 2700 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 2 exec python3 ~/.scripts/set_gamma_ramp.py 3000 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 3 exec python3 ~/.scripts/set_gamma_ramp.py 3300 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 4 exec python3 ~/.scripts/set_gamma_ramp.py 3600 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 5 exec python3 ~/.scripts/set_gamma_ramp.py 3900 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 6 exec python3 ~/.scripts/set_gamma_ramp.py 4200 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 7 exec python3 ~/.scripts/set_gamma_ramp.py 4500 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 8 exec python3 ~/.scripts/set_gamma_ramp.py 4800 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 9 exec python3 ~/.scripts/set_gamma_ramp.py 5100 1.0 1.2 1.4 1.0; mode "default"
+    bindsym 0 exec python3 ~/.scripts/set_gamma_ramp.py 5500 1.0 1.2 1.4 1.0; mode "default"
 
     # Graphics card settings: applied after reboot
     bindsym Shift+g mode $graphicsMode
@@ -895,5 +1057,21 @@ hide_edge_borders both
 for_window [title=".*TJOTP-3C.*"] move container to workspace $ws4
 for_window [class="TJOTP-3C Trajectory Visualizer"] move container to workspace $ws4
 
-# Bind workspace 4 to laptop screen
-workspace $ws4 output eDP-1-1
+# Workspace 4 output assignment handled above (DP-0)
+
+# i3 workspace selector daemon (i3expod)
+exec --no-startup-id i3expod
+
+# wsfind: global workspace content search (added by wsfind installer)
+bindsym $mod+Control+d	exec --no-startup-id /home/jakub/.local/bin/wsfind
+
+
+# >>> tmc-i3wm-quick (managed by install.sh) >>>
+# $mod+n → floating nvim popup on the current workspace. Header lines
+# session / lane / model / effort / group / dir (empty = default), the
+# prompt below ---. :wq creates the TMC session (default dir
+# ~/Documents/tmc-sessions/<session>) and launches claude-lane in it.
+# :q! aborts.
+for_window [class="XTerm"][title="^TMC-QUICK$"] floating enable, resize set 1920 1080, move position center
+bindsym $mod+n exec --no-startup-id /home/jakub/.local/bin/tmc-quick
+# <<< tmc-i3wm-quick <<<

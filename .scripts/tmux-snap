@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Take a fresh tmux + Claude snapshot and point ~/Documents/tmux-snapshots/latest at it.
+# Run this as the LAST thing before shutting the machine down. Restore with: tmux-restore
+set -euo pipefail
+tmux-claude-snapshot.py "$@"
+latest=$(ls -td "$HOME"/Documents/tmux-snapshots/2*/ | head -1)
+ln -sfn "$latest" "$HOME/Documents/tmux-snapshots/latest"
+echo "latest -> $latest"

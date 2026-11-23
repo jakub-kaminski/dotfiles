@@ -21,6 +21,20 @@ xterm*charClass: 33:48,35:48,37:48,43:48,45-47:48,64:48,95:48,126:48
 xterm*termName: xterm-color
 xterm*eightBitInput: false
 
+! Enable sixel graphics (for ranger image previews over ssh/tmux).
+! vt340 makes xterm answer DA1 with sixel capability so tmux passes sixels through.
+! Needs a NEW xterm after 'xrdb -merge ~/.Xresources'.
+xterm*decTerminalID: vt340
+xterm*numColorRegisters: 256
+xterm*sixelScrolling: true
+
+! Allow OSC 52 clipboard WRITE so tmux 'set-clipboard on' (and apps using OSC 52)
+! can put text into the X11 CLIPBOARD. This is the xterm default disallowedWindowOps
+! list with only SetSelection removed; GetSelection stays blocked, so remote/inner
+! apps still cannot READ the clipboard back (no exfiltration). Needs a NEW xterm
+! after 'xrdb -merge ~/.Xresources'.
+xterm*disallowedWindowOps: 1,2,3,4,5,6,7,8,9,11,13,14,18,19,20,21,GetSelection,SetWinLines,SetXprop
+
 !*foreground: #00cc00
 *foreground_bold: #a8a19f
 !! this coursor value causes problems to Python3 windows in i3wm
@@ -112,8 +126,16 @@ rofi.width:		30
 
 
 
+! Make xterm emit DISTINCT sequences for Ctrl+Tab and Ctrl+Shift+Tab so tmux can
+! bind them (both normally collapse to plain Tab = 0x09). Two subtleties:
+!   - tmux only auto-enables modifyOtherKeys level 1, which cannot encode Tab, so we
+!     inject the level-2 CSI form (ESC [27;mod;9~) directly via these translations.
+!   - Shift+Tab does NOT yield keysym Tab+Shift; X maps it to ISO_Left_Tab. So the
+!     Ctrl+Shift+Tab entry must match <Key>ISO_Left_Tab, NOT <Key>Tab. Leaving Shift
+!     unlisted makes it fire for EITHER Shift key (Left OR Right) — both feed ShiftMask.
+! Every translation line except the LAST must end with a literal \n then a backslash.
 *vt100.translations: #override \n\
-    Ctrl ~Shift <Key>Tab: string(0x1b) string("[27;5;9~") \n \
-    Ctrl Shift <Key>Tab: string(0x1b) string("[27;6;9~") \n
-    Ctrl <Key> minus: smaller-vt-font() \n\
-    Ctrl <Key> plus: larger-vt-font()
+    Ctrl ~Shift <Key>Tab: string(0x1b) string("[27;5;9~") \n\
+    Ctrl <Key>ISO_Left_Tab: string(0x1b) string("[27;6;9~") \n\
+    Ctrl <Key>minus: smaller-vt-font() \n\
+    Ctrl <Key>plus: larger-vt-font()

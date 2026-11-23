@@ -8,7 +8,8 @@
 # Only for interactive shells
 if [[ $- == *i* ]]; then
   # If not already in tmux, exec into tmux immediately
-  if [[ -z "$TMUX" ]]; then
+  # (set NO_TMUX=1 in the environment to opt out, e.g. detached xterms)
+  if [[ -z "$TMUX" && -z "$NO_TMUX" ]]; then
     # For SSH connections, use a dedicated session
     if [[ -n "$SSH_CONNECTION" ]]; then
       exec tmux new-session -A -s ssh_tmux
@@ -26,9 +27,15 @@ export ZSH=$HOME/.oh-my-zsh
 export QTDIR=$HOME/Qt/6.4.3
 
 # fix VLC problems
-export LIBGL_ALWAYS_SOFTWARE=1
+# Disabled 2026-05-27: this forces all GL clients into software rendering,
+# which breaks any Qt/GL application (e.g. tool-load-simulator GUI).
+# If VLC still has the original problem, prefer fixing VLC instead.
+# export LIBGL_ALWAYS_SOFTWARE=1
 
 ZSH_THEME="robbyrussell"
+
+# Skip compaudit security scan of completion dirs (~75ms, single-user machine)
+ZSH_DISABLE_COMPFIX=true
 
 # Verasonics
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$HOME/lib"
@@ -56,7 +63,7 @@ SAVEHIST=1000000
 #   ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
 alias cost="npx ccusage@latest daily"
-alias codex="/usr/local/node-v18.16.0-linux-x64/bin/codex"
+# codex installed globally via nvm (npm install -g @openai/codex)
 alias wr="source $HOME/.scripts/daydir"
 
 alias killros2="killall -9 \
@@ -87,7 +94,10 @@ alias matlab="/usr/local/MATLAB/R2023a/bin/matlab"
 alias matlabt="/usr/local/MATLAB/R2023a/bin/matlab -nodesktop"
 alias matlabt22="$HOME/matlab2022/bin/matlab -nodesktop"
 
-export MESA_LOADER_DRIVER_OVERRIDE=i965
+# Disabled 2026-05-27: this forces Mesa to load the Intel i965 driver, but
+# this machine is NVIDIA-only (GeForce GTX 1070). Forcing i965 makes Mesa
+# fail driver load and prevents *any* GL context creation, even via NVIDIA.
+# export MESA_LOADER_DRIVER_OVERRIDE=i965
 
 alias mlint="/usr/local/MATLAB/R2019b/bin/glnxa64/mlint"
 LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libexpat.so
@@ -98,14 +108,9 @@ LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libexpat.so
 
 zstyle :compinstall filename "$HOME/.zshrc"
 
-#   *** Cached compinit (saves ~0.2s) ***
-autoload -Uz compinit
-# Only regenerate .zcompdump once per day
-if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
-  compinit
-else
-  compinit -C
-fi
+# compinit is handled by oh-my-zsh (cached ~/.zcompdump-<host>-<ver> + zwc).
+# Do NOT call compinit again here — a second call re-scanned all ~1000
+# completion files and rewrote the dump on every startup (~0.6s).
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
@@ -124,8 +129,8 @@ bindkey '^[[B' down-line-or-search
 bindkey -M vicmd 'k' up-line-or-search
 bindkey -M vicmd 'j' down-line-or-search
 
-export VISUAL=/usr/local/bin/nvim
-export EDITOR=/usr/local/bin/nvim
+export VISUAL=/usr/bin/nvim
+export EDITOR=/usr/bin/nvim
 
 # Open current command in vim with 'v' in normal mode
 bindkey -M vicmd v edit-command-line
@@ -139,12 +144,17 @@ zle -N bracketed-paste bracketed-paste-magic
 autoload -Uz url-quote-magic
 zle -N self-insert url-quote-magic
 
-# Vi-mode clipboard integration
+# Vi-mode clipboard integration — route through the unified clip bridge
+# (~/.scripts/clip-copy / clip-paste) so shell yanks sync with tmux/vim/nvim and
+# work over ssh (OSC 52) just like locally. Handy general helpers:
+#   echo hi | clip      copy stdin        clipo      print the clipboard
+alias clip='clip-copy'
+alias clipo='clip-paste'
 yanktoclipboard(){
-        echo $BUFFER | xsel -i -b
+        print -rn -- "$BUFFER" | clip-copy
     }
 pastefromclipboard(){
-        RBUFFER=$(xsel -o -b </dev/null)$RBUFFER
+        RBUFFER="$(clip-paste </dev/null)$RBUFFER"
     }
 zle -N yanktoclipboard
 zle -N pastefromclipboard
@@ -218,7 +228,7 @@ conda() {
 export NVM_DIR="$HOME/.nvm"
 
 _nvm_load() {
-  unset -f nvm node npm npx yarn pnpm
+  unset -f nvm node npm npx yarn pnpm codex
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
   [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 }
@@ -229,13 +239,35 @@ npm()  { _nvm_load; npm "$@"; }
 npx()  { _nvm_load; npx "$@"; }
 yarn() { _nvm_load; yarn "$@"; }
 pnpm() { _nvm_load; pnpm "$@"; }
+codex() { _nvm_load; codex "$@"; }
 
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 
 # bun
 [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 
+# Recover DISPLAY inside tmux when the session env stripped it (attaching from
+# a DISPLAY-less client sets "-DISPLAY" via update-environment, which breaks
+# GUI launches like rifle/zathura from ranger). Only restore if the X socket
+# for that display actually exists on this machine.
+if [[ -n $TMUX && -z $DISPLAY ]]; then
+  _tmux_display=$(tmux show-environment -g DISPLAY 2>/dev/null | cut -d= -f2-)
+  if [[ -n $_tmux_display && -S /tmp/.X11-unix/X${${_tmux_display#:}%%.*} ]]; then
+    export DISPLAY=$_tmux_display
+  fi
+  unset _tmux_display
+fi
+
 # Private config (work dirs, SSH keys, VPN, etc.) — not tracked by git
 [ -f ~/.zshrc-private ] && source ~/.zshrc-private
+
+source ~/Documents/my-utils/git-dir-tracker/git-dir-tracker.sh
+
+# .NET SDK (user-local)
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$PATH"
+
+# claude-quota-pilot: cl shorthand for claude-lane
+source /home/jakub/Documents/claude-quota-pilot/scripts/cl.zsh

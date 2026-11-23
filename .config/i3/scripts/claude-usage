@@ -1,0 +1,94 @@
+#!/bin/sh
+# claude-usage — i3blocks block showing Claude Code usage limits.
+#
+# DATA SOURCE: the OFFICIAL statusline `rate_limits` object that Claude Code
+# itself emits, cached by ~/.config/i3/scripts/claude-usage-harvest (wired as the
+# statusLine command in Claude Code settings). ToS-clean: no token, no API call,
+# no endpoint, no User-Agent spoof — we only read data the official client handed
+# us, plus the local ccusage logs for cost.
+#
+#   5h = rolling 5-hour session window   7d = rolling 7-day (weekly) window
+#
+# The cache refreshes whenever you run a Claude Code session. While idle the
+# numbers hold (you're not consuming), and the reset countdown stays correct
+# because it's derived from an absolute reset time. $… spend still comes from
+# ccusage (local logs).
+#
+# (Previous version polled https://api.anthropic.com/api/oauth/usage with the
+#  OAuth token — a Terms-of-Service violation. Kept as claude-usage.bak-endpoint.)
+
+CACHE_DIR="$HOME/.cache/claude-usage"
+CACHE="$CACHE_DIR/rate_limits.json"
+mkdir -p "$CACHE_DIR" 2>/dev/null
+now=$(date +%s)
+
+command -v jq >/dev/null 2>&1 || { echo "CC: need jq"; exit 0; }
+
+# --- today's spend via ccusage (local logs; unchanged, ToS-clean) ----------
+COST_CACHE="$CACHE_DIR/cost-today"
+COST_REFRESH="$HOME/.config/i3/scripts/claude-cost-refresh"
+COST_TTL=300
+today_local=$(date +%Y-%m-%d)
+money=""; spawn=0
+[ "$BLOCK_BUTTON" = "1" ] && spawn=1          # left-click forces a cost refresh
+if [ -f "$COST_CACHE" ]; then
+    read -r cdate cint _ < "$COST_CACHE"
+    cage=$(( now - $(stat -c %Y "$COST_CACHE" 2>/dev/null || echo 0) ))
+    [ "$cdate" = "$today_local" ] && money="$cint"
+    { [ "$cdate" != "$today_local" ] || [ "$cage" -ge "$COST_TTL" ]; } && spawn=1
+else
+    spawn=1
+fi
+[ "$spawn" -eq 1 ] && [ -x "$COST_REFRESH" ] && ( "$COST_REFRESH" >/dev/null 2>&1 </dev/null & )
+if [ -n "$money" ]; then mtxt="\$$money"; else mtxt="\$…"; fi
+
+# --- no statusline data yet? guide the user --------------------------------
+if [ ! -f "$CACHE" ]; then
+    printf '<span color="#7f848e">CC: run a Claude session</span>  <span color="#d19a66">%s</span>\n' "$mtxt"
+    printf 'CC -- %s\n' "$mtxt"
+    exit 0
+fi
+
+# --- read both windows from the statusline cache ---------------------------
+read -r p5 r5 p7 r7 cached_at <<EOF
+$(jq -r '[(.five_hour.used_percentage // "null"), (.five_hour.resets_at // "null"),
+          (.seven_day.used_percentage // "null"), (.seven_day.resets_at // "null"),
+          (.cached_at // 0)] | @tsv' "$CACHE" 2>/dev/null)
+EOF
+[ -n "$cached_at" ] || cached_at=0
+
+# render_win <used_pct> <resets_at_epoch> <cd|clk>  -> sets PCT CLR MARK
+render_win() {
+    _p=$1; _r=$2; _kind=$3
+    if [ "$_p" = "null" ] || [ -z "$_p" ]; then PCT="--"; CLR="#7f848e"; MARK="--"; return; fi
+    _pi=${_p%.*}
+    _ri="$_r"; [ "$_ri" != "null" ] && _ri=${_ri%.*}
+    if [ "$_ri" != "null" ] && [ -n "$_ri" ] && [ "$_ri" -le "$now" ] 2>/dev/null; then
+        PCT="0"; CLR="#98c379"; MARK="ready"; return       # window already reset -> fresh
+    fi
+    PCT="$_pi"
+    if   [ "$_pi" -ge 85 ] 2>/dev/null; then CLR="#e06c75"     # red
+    elif [ "$_pi" -ge 60 ] 2>/dev/null; then CLR="#e5c07b"     # yellow
+    else                                     CLR="#98c379"; fi # green
+    if [ "$_r" = "null" ] || [ -z "$_r" ]; then MARK="--"; return; fi
+    _d=$(( _ri - now )); [ "$_d" -lt 0 ] && _d=0
+    if [ "$_kind" = "cd" ]; then
+        _h=$(( _d / 3600 )); _m=$(( (_d % 3600) / 60 ))
+        if [ "$_h" -ge 24 ]; then MARK=$(printf '%dd%dh' "$(( _h / 24 ))" "$(( _h % 24 ))")
+        else                      MARK=$(printf '%dh%02dm' "$_h" "$_m"); fi
+    else
+        MARK=$(date -d "@$_ri" '+%a %H:%M' 2>/dev/null || echo '--')
+    fi
+}
+
+render_win "$p5" "$r5" cd;  P5=$PCT; C5=$CLR; M5=$MARK
+render_win "$p7" "$r7" clk; P7=$PCT; C7=$CLR; M7=$MARK
+
+# subtle staleness dot when the cached numbers are older than 1h
+stale=""
+[ "$cached_at" -gt 0 ] 2>/dev/null && [ $(( now - cached_at )) -gt 3600 ] && stale=' <span color="#5c6370">·</span>'
+
+# full_text (pango) + short_text
+printf '<span color="%s">5h %s%% ↻%s</span>  <span color="%s">7d %s%% ↻%s</span>%s  <span color="#d19a66">%s</span>\n' \
+    "$C5" "$P5" "$M5" "$C7" "$P7" "$M7" "$stale" "$mtxt"
+printf '%s%%/%s%% %s\n' "$P5" "$P7" "$mtxt"

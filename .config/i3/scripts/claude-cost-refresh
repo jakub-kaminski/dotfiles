@@ -1,0 +1,55 @@
+#!/bin/sh
+# claude-cost-refresh — compute today's Anthropic (Claude) spend and cache it
+# for the i3blocks `claude-usage` block.
+#
+# Source of truth is the same `cost` command Jakub runs in the terminal:
+#   cost == `npx ccusage@latest daily`
+# We call ccusage in JSON mode, filtered to *today only* (fast — scans just
+# today's transcripts), and take the combined total across all detected agents
+# (Claude + Codex), matching the headline figure of the `cost` command.
+#
+# ccusage is heavy (~2s, high CPU), so this runs detached in the background and
+# is single-flighted with a lock. The block reads the cache; it never waits.
+#
+# Cache line format:  "<YYYY-MM-DD> <floored-dollars> <exact-cost>"
+
+CACHE_DIR="$HOME/.cache/claude-usage"
+CACHE="$CACHE_DIR/cost-today"
+LOCK="$CACHE_DIR/cost.lock"
+mkdir -p "$CACHE_DIR"
+
+# --- single-flight: skip if a refresh is already running -------------------
+mkdir "$LOCK" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+command -v jq >/dev/null 2>&1 || exit 0
+
+# --- resolve node (nvm) + the ccusage binary (no PATH assumptions) ---------
+NODE_BIN=$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)
+[ -n "$NODE_BIN" ] && PATH="$NODE_BIN:$PATH"
+export PATH
+CCUSAGE=$(ls -t "$HOME"/.npm/_npx/*/node_modules/.bin/ccusage 2>/dev/null | head -1)
+
+ymd=$(date +%Y%m%d)
+dash=$(date +%Y-%m-%d)
+
+if [ -n "$CCUSAGE" ]; then
+    json=$("$CCUSAGE" daily --json --since "$ymd" --until "$ymd" 2>/dev/null)
+else
+    json=$(npx -y ccusage@latest daily --json --since "$ymd" --until "$ymd" 2>/dev/null)
+fi
+[ -n "$json" ] || exit 0   # keep last good cache on failure
+
+cost=$(printf '%s' "$json" | jq -r --arg d "$dash" \
+    '[.daily[] | select(.period==$d) | .totalCost] | add // 0' 2>/dev/null)
+
+# guard: only accept a plain decimal number, else keep the previous cache
+case "$cost" in
+    ''|*[!0-9.]*) exit 0 ;;
+esac
+
+dollars=${cost%%.*}                 # truncate at the decimal point == floor (cost >= 0)
+[ -n "$dollars" ] || dollars=0
+
+tmp="$CACHE.tmp.$$"
+printf '%s %s %s\n' "$dash" "$dollars" "$cost" > "$tmp" && mv -f "$tmp" "$CACHE"

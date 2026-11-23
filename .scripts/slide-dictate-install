@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# slide-dictate-install: install the slide-dictation service (slide-dictate.service, 127.0.0.1:8136) and the i3 hotkeys.
+#
+#   $mod+F12        toggle: start recording for the slide shown in the speaker-notes window / stop + transcribe
+#   $mod+Shift+F12  stop + transcribe (explicit, safe to press twice)
+#
+# Idempotent: the i3 block lives between marker comments and is replaced on every run; a timestamped backup of the
+# config is written first. ~/.config/i3/config and the dotfiles copy (~/Documents/dotfiles/.config/i3/config) get the
+# same block when both exist as separate files (a symlink is edited once).
+#
+# The i3 config is NOT reloaded unless --reload is given: `i3-msg reload` re-runs every exec_always line of the config
+# (xrdb, feh, greenclip and a `tmux send-keys -t 0:0 'clear && neofetch' Enter`), so do it at a quiet moment.
+#
+# Usage: slide-dictate-install [--reload] [--no-service] [--uninstall]
+set -euo pipefail
+
+RELOAD=0 SERVICE=1 UNINSTALL=0
+for a in "$@"; do
+    case "$a" in
+        --reload) RELOAD=1 ;;
+        --no-service) SERVICE=0 ;;
+        --uninstall) UNINSTALL=1 ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        *) echo "unknown option: $a" >&2; exit 2 ;;
+    esac
+done
+
+BIN="$HOME/.scripts/slide-dictate"
+UNIT_DIR="$HOME/.config/systemd/user"
+UNIT="$UNIT_DIR/slide-dictate.service"
+BEGIN="# >>> slide-dictate (deck15/slideaudio) >>>"
+END="# <<< slide-dictate <<<"
+BLOCK="$BEGIN
+# Free-speech dictation per presentation slide -> ~/Documents/tormach/planner-pitch/slides-audio/ (see its README.md)
+bindsym \$mod+F12		exec --no-startup-id $BIN toggle
+bindsym \$mod+Shift+F12	exec --no-startup-id $BIN stop
+$END"
+STAMP=$(date +%Y%m%d-%H%M%S)
+
+edit_i3() {   # $1 = config file: drop an old block, then add the new one after the F-key bindings
+    local f="$1" tmp
+    [ -f "$f" ] || return 0
+    cp -p "$f" "$f.bak-slidedictate-$STAMP"
+    tmp=$(mktemp)
+    awk -v b="$BEGIN" -v e="$END" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$f" > "$tmp"
+    if [ "$UNINSTALL" = 0 ]; then
+        # conflict check: any other binding of these keys?
+        if grep -nE '^[[:space:]]*bindsym[[:space:]]+\$mod\+(Shift\+)?F12[[:space:]]' "$tmp"; then
+            echo "ERROR: $f already binds \$mod+F12 / \$mod+Shift+F12 (lines above); nothing changed" >&2
+            rm -f "$tmp" "$f.bak-slidedictate-$STAMP"; return 1
+        fi
+        if grep -qE '^##bindsym \$mod\+F12$' "$tmp"; then   # put it next to the other F-key bindings
+            awk -v blk="$BLOCK" '{print} /^##bindsym \$mod\+F12$/ && !done {print blk; done=1}' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
+        else
+            printf '\n%s\n' "$BLOCK" >> "$tmp"
+        fi
+    fi
+    cat "$tmp" > "$f"   # keep the inode / permissions
+    rm -f "$tmp"
+    echo "i3: $( [ "$UNINSTALL" = 1 ] && echo removed from || echo updated) $f (backup $f.bak-slidedictate-$STAMP)"
+}
+
+LIVE="$HOME/.config/i3/config"
+DOT="$HOME/Documents/dotfiles/.config/i3/config"
+edit_i3 "$(readlink -f "$LIVE")"
+if [ -f "$DOT" ] && [ "$(readlink -f "$DOT")" != "$(readlink -f "$LIVE")" ]; then
+    edit_i3 "$DOT"
+    if cmp -s "$(readlink -f "$LIVE")" "$DOT"; then echo "i3: live config and dotfiles copy identical"; else echo "WARNING: live i3 config and dotfiles copy differ (they differed before?)" >&2; fi
+fi
+i3 -C -c "$(readlink -f "$LIVE")" >/dev/null 2>&1 && echo "i3: config check OK" || { echo "ERROR: i3 -C reports a config error" >&2; i3 -C -c "$(readlink -f "$LIVE")" | tail -5 >&2; }
+
+if [ "$SERVICE" = 1 ]; then
+    mkdir -p "$UNIT_DIR"
+    if [ "$UNINSTALL" = 1 ]; then
+        systemctl --user disable --now slide-dictate.service 2>/dev/null || true
+        rm -f "$UNIT"; systemctl --user daemon-reload
+        echo "service: removed"
+    else
+        cat > "$UNIT" <<EOF
+# Slide dictation for planner-15min-en: on-slide record/stop buttons + i3 hotkeys -> slides-audio/*.md
+# Installed by ~/.scripts/slide-dictate-install (deck15/slideaudio).
+[Unit]
+Description=deck15 slide dictation (127.0.0.1:8136 -> planner-pitch/slides-audio)
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=$BIN serve --port 8136
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
+EOF
+        systemctl --user daemon-reload
+        systemctl --user enable --now slide-dictate.service
+        sleep 1
+        curl -s -m 3 http://127.0.0.1:8136/health >/dev/null && echo "service: slide-dictate running on 127.0.0.1:8136" || echo "WARNING: service not answering yet: journalctl --user -u slide-dictate" >&2
+    fi
+fi
+
+if [ "$RELOAD" = 1 ]; then
+    i3-msg reload >/dev/null && echo "i3: reloaded"
+else
+    echo "i3: NOT reloaded. When convenient: i3-msg reload   (or \$mod+Shift+c; re-runs exec_always lines)"
+fi

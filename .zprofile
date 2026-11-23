@@ -7,8 +7,8 @@ export FZF_DEFAULT_COMMAND='rg --files --no-ignore --hidden --follow --glob "!.g
 VIMRUNTIME=/usr/bin
 #EDITOR=/usr/bin/vim TODO: tidy up
 export VISUAL=/usr/bin/vim;
-export EDITOR=/home/jakub/tools/nvim/nvim
-export RIPGREP_CONFIG_PATH=/home/jakub/.ripgreprc
+export EDITOR=/usr/bin/nvim
+export RIPGREP_CONFIG_PATH=$HOME/.ripgreprc
 #export EDITOR='/home/jakub/tools/nvim -u /home/jakub/Dropbox/sync/homedir/.config/nvim/init-coc.vim'
 export BROWSER="opera"
 export TERM="xterm-256color" #required for tmux
@@ -22,6 +22,6 @@ emulate sh -c 'source /etc/profile'
 #udiskie -t &
 
 # idle-state-seconds to turn off monitor
-xset dpms 0 0 3000
+[ -n "$DISPLAY" ] && xset dpms 0 0 3000
 
-xrdb ~/.Xresources
+[ -n "$DISPLAY" ] && xrdb ~/.Xresources

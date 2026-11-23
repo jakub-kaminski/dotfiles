@@ -1,0 +1,17 @@
+# greenclip configuration. Records the X11 CLIPBOARD (deliberate copies) only —
+# NOT the PRIMARY selection (use_primary_selection_as_input = false), matching the
+# choice to keep mouse-select and Ctrl+C separate. Everything clip-copy writes
+# (tmux/nvim/vim/shell), plus browser/voxtype copies, lands here; the $mod+Shift+c
+# rofi picker browses it.
+[greenclip]
+history_file = "/home/jakub/.cache/greenclip.history"
+max_history_length = 100
+max_selection_size_bytes = 0
+trim_space_from_selection = true
+use_primary_selection_as_input = false
+enable_image_support = false
+# Don't record copies made from these apps (matched by X11 WM_CLASS) — handy for
+# password managers. Add yours, e.g. ["keepassxc", "Bitwarden", "1Password"].
+blacklisted_applications = []
+image_cache_directory = "/tmp/greenclip"
+static_history = []

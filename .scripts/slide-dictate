@@ -1,0 +1,702 @@
+#!/usr/bin/python3 -I
+"""slide-dictate: free-speech dictation per presentation slide -> a transcript draft in slides-audio/.
+
+One engine, two front ends (deck15/slideaudio, 2026-11-06):
+  * the deck's on-slide record / stop buttons (POST to this service; the page sends the slide it shows), and
+  * i3 hotkeys -> this file as a CLI client (the slide comes from the speaker-notes window title "Notes · N / T · ...",
+    mapped to the stable slide id with `deck-grayed --json`).
+
+Audio is captured by this service itself (parec on the USB microphone, 16 kHz mono s16le), NOT by the voxtype daemon:
+no 60 s voxtype limit, nothing typed into the focused window, F9 push-to-talk untouched (PipeWire shares the source).
+Transcription: faster-whisper on gpu-box through the voxtype tunnel (127.0.0.1:8089), else the local GTX 1070 server
+(127.0.0.1:8090, lazy-loads its model), else the WAV is kept and an .error.md is written next to the drafts
+(re-run later: slide-dictate retry <wav>). The WAV of every recording is kept in slides-audio/audio/.
+
+Service (systemd --user unit slide-dictate.service), bound to 127.0.0.1 only:
+  GET  /status            -> {"state": "idle"|"recording", "slide", "started", "elapsed_s", "jobs", "last"}
+  POST /start  {gid, key, n, total, title, lang?, via?}  -> 200 status | 409 already recording
+  POST /stop   {}         -> 200 {"ok", "wav", "duration_s"}; transcription runs in the background
+  POST /cancel {}         -> stop and DISCARD the recording (explicit user action)
+  POST /retry  {wav}      -> re-transcribe a kept WAV (meta from its .json sidecar)
+  GET  /health            -> {"ok": true, ...}
+Browser requests must carry an allowed Origin (http://localhost|127.0.0.1[:port] or file:// "null"): a foreign web
+page cannot start the microphone.
+
+CLI:  slide-dictate start|stop|toggle|cancel|status|retry <wav>|serve [--port 8136]
+      start/toggle options: --lang en|pl|auto  --title-file <file with a fake window title> (testing)
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import traceback
+import unicodedata
+import uuid
+import wave
+from datetime import datetime
+from http.client import HTTPConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+HOME = Path.home()
+OUT_DIR = Path(os.environ.get("SLIDE_DICTATE_DIR", HOME / "Documents/tormach/planner-pitch/slides-audio"))
+AUDIO_DIR = OUT_DIR / "audio"
+PORT = int(os.environ.get("SLIDE_DICTATE_PORT", "8136"))
+USB_MIC = "alsa_input.usb-USB_MICROPHONE_USB_MICROPHONE_20190809-00.analog-stereo"   # as in ~/.scripts/voxtype-start.sh
+SOURCE = os.environ.get("SLIDE_DICTATE_SOURCE", "")   # empty: the USB mic when present, else the default source
+REMOTE = os.environ.get("SLIDE_DICTATE_REMOTE", "http://127.0.0.1:8089")   # voxtype tunnel -> gpu-box faster-whisper
+LOCAL = os.environ.get("SLIDE_DICTATE_LOCAL", "http://127.0.0.1:8090")     # GTX 1070 faster-whisper (lazy load)
+MODEL = os.environ.get("SLIDE_DICTATE_MODEL", "large-v3")
+LANG = os.environ.get("SLIDE_DICTATE_LANG", "en")
+MAX_SECS = float(os.environ.get("SLIDE_DICTATE_MAX_SECS", "1200"))   # safety auto-stop (20 min)
+RATE = 16000
+ORIGIN_OK = re.compile(r"^(null|https?://(localhost|127\.0\.0\.1)(:\d+)?)$")
+LOG_FILE = HOME / ".local/state/slide-dictate.log"
+NOTIFY_ID = "slide-dictate"
+NOTIFY = os.environ.get("SLIDE_DICTATE_NOTIFY", "1") != "0"   # 0: no desktop notifications (tests)
+
+LOCK = threading.RLock()
+REC = {}     # the current recording: proc, raw, meta, t0
+JOBS = {}    # wav -> phase text while transcribing
+LAST = {}    # the last finished job: {"file", "ok", "error", "at"}
+
+
+def log(*a):
+    line = f"[{datetime.now().strftime('%H:%M:%S')}] " + " ".join(str(x) for x in a)
+    print(line, file=sys.stderr, flush=True)
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_FILE.open("a", encoding="utf8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def notify(summary, body="", urgency="normal", ms=4000):
+    if not NOTIFY:
+        log("notify:", summary, "|", body.replace("\n", " / "))
+        return
+    try:
+        subprocess.Popen(
+            ["notify-send", "-a", "Slide dictation", "-u", urgency, "-t", str(ms),
+             "-h", f"string:x-canonical-private-synchronous:{NOTIFY_ID}", "-h", f"string:x-dunst-stack-tag:{NOTIFY_ID}",
+             summary, body],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def now_iso():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def slugify(s, n=60):
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    s = re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-").lower()
+    return s[:n].rstrip("-")
+
+
+def slide_id(slide):
+    """A short, stable, filename-safe id: the slide key when it has one, else g + 8 hex of the stable gid."""
+    key = (slide.get("key") or "").strip()
+    if key:
+        return slugify(key, 40) or "key"
+    gid = (slide.get("gid") or "").strip()
+    if gid:
+        return "g" + hashlib.sha1(gid.encode("utf8")).hexdigest()[:8]
+    return "unknown-slide"
+
+
+def pick_source():
+    if SOURCE:
+        return SOURCE
+    try:
+        out = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True, timeout=5).stdout
+        if USB_MIC in out.split():
+            return USB_MIC
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""   # parec's default source
+
+
+# ------------------------------------------------------------------ recording
+
+def status():
+    with LOCK:
+        st = {"state": "recording" if REC else "idle", "jobs": dict(JOBS), "last": dict(LAST) or None}
+        if REC:
+            m = REC["meta"]
+            st.update(slide=m["slide"], started=m["started"], elapsed_s=round(time.monotonic() - REC["t0"], 1),
+                      max_s=MAX_SECS)
+        return st
+
+
+def start(slide, lang=None, via="deck"):
+    with LOCK:
+        if REC:
+            return 409, dict(status(), error="already recording")
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        t = datetime.now().astimezone()
+        sid = slide_id(slide)
+        n = slide.get("n")
+        nn = f"s{int(n):02d}-" if str(n or "").isdigit() and int(n) > 0 else ""
+        base = f"{t.strftime('%Y-%m-%dT%H-%M-%S')}__{nn}{sid}"
+        slug = slugify(slide.get("title") or "")
+        if slug:
+            base += "__" + slug
+        raw = AUDIO_DIR / (base + ".raw")
+        src = pick_source()
+        meta = {"base": base, "slide": slide, "slide_id": sid, "started": t.isoformat(timespec="seconds"),
+                "lang": lang or LANG, "via": via, "source": src or "(default)", "raw": str(raw)}
+        (AUDIO_DIR / (base + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf8")
+        cmd = ["parec", "--raw", "--latency-msec=50", f"--rate={RATE}", "--channels=1", "--format=s16le", "--client-name=slide-dictate"]
+        if src:
+            cmd.append(f"--device={src}")
+        f = raw.open("wb")
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.PIPE)
+        finally:
+            f.close()
+        time.sleep(0.3)
+        if proc.poll() is not None:
+            err = proc.stderr.read().decode("utf8", "replace").strip()
+            log("parec failed:", err)
+            notify("Dictation: microphone error", err[:200], "critical", 8000)
+            return 500, {"error": f"parec exited: {err}"}
+        REC.update(proc=proc, raw=raw, meta=meta, t0=time.monotonic())
+        threading.Thread(target=_watchdog, args=(proc,), daemon=True).start()
+    title = slide.get("title") or "unknown slide"
+    where = f"slide {n} / {slide.get('total')}" if n else "slide ?"
+    log("start", base, "via", via, "source", src or "(default)")
+    notify(f"● Recording · {where}", title, "normal", 3000)
+    return 200, status()
+
+
+def _watchdog(proc):
+    while proc.poll() is None:
+        time.sleep(1)
+        with LOCK:
+            if REC.get("proc") is not proc:
+                return
+            if time.monotonic() - REC["t0"] >= MAX_SECS:
+                log("max duration reached, auto-stop")
+                notify("Dictation auto-stopped", f"{MAX_SECS / 60:.0f} min limit reached; transcribing", "critical", 8000)
+                threading.Thread(target=stop, daemon=True).start()
+                return
+    with LOCK:   # parec died on its own (device unplugged?): keep what we have
+        if REC.get("proc") is proc:
+            log("parec exited unexpectedly, rc", proc.returncode)
+            notify("Dictation: recording interrupted", "the microphone stream ended; saving what was captured", "critical", 8000)
+            threading.Thread(target=stop, daemon=True).start()
+
+
+def _end_capture(proc):
+    if proc.poll() is None:
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(3)
+
+
+def raw_to_wav(raw, wav):
+    data = Path(raw).read_bytes()
+    data = data[: len(data) // 2 * 2]
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(data)
+    return len(data) / 2 / RATE
+
+
+def stop(discard=False):
+    with LOCK:
+        if not REC:
+            return 409, dict(status(), error="not recording")
+        proc, raw, meta = REC["proc"], REC["raw"], REC["meta"]
+        REC.clear()
+    _end_capture(proc)
+    meta["stopped"] = now_iso()
+    if discard:
+        for p in (raw, AUDIO_DIR / (meta["base"] + ".json")):
+            Path(p).unlink(missing_ok=True)
+        log("cancel", meta["base"])
+        notify("Dictation cancelled", "recording discarded", "low", 2500)
+        return 200, dict(status(), cancelled=True)
+    wav = AUDIO_DIR / (meta["base"] + ".wav")
+    try:
+        dur = raw_to_wav(raw, wav)
+    except Exception as e:   # keep the .raw: nothing is lost
+        log("wav write failed:", e)
+        write_error(meta, f"could not write the WAV ({e}); raw audio kept: {raw}")
+        return 500, {"error": str(e), "raw": str(raw)}
+    raw.unlink(missing_ok=True)
+    meta.update(duration_s=round(dur, 1), wav=str(wav))
+    meta.pop("raw", None)
+    (AUDIO_DIR / (meta["base"] + ".json")).write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf8")
+    log("stop", meta["base"], f"{dur:.1f} s")
+    notify(f"■ Stopped · {dur:.0f} s", "transcribing ...", "low", 3000)
+    with LOCK:
+        JOBS[str(wav)] = "queued"
+    threading.Thread(target=transcribe_job, args=(meta,), daemon=True).start()
+    return 200, {"ok": True, "wav": str(wav), "duration_s": round(dur, 1)}
+
+
+# ------------------------------------------------------------------ transcription
+
+def multipart(fields, wav_bytes):
+    b = "----slide-dictate-" + uuid.uuid4().hex
+    out = bytearray()
+    for k, v in fields.items():
+        out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+    out += f'--{b}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode()
+    out += wav_bytes + f"\r\n--{b}--\r\n".encode()
+    return bytes(out), f"multipart/form-data; boundary={b}"
+
+
+def post_transcribe(base_url, wav_bytes, fields, timeout):
+    u = urlsplit(base_url)
+    body, ctype = multipart(fields, wav_bytes)
+    conn = HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    try:
+        conn.request("POST", (u.path.rstrip("/") or "") + "/v1/audio/transcriptions", body=body,
+                     headers={"Content-Type": ctype, "Content-Length": str(len(body))})
+        r = conn.getresponse()
+        data = r.read()
+        if r.status != 200:
+            raise RuntimeError(f"HTTP {r.status}: {data[:300].decode('utf8', 'replace')}")
+        return json.loads(data)
+    finally:
+        conn.close()
+
+
+def health(base_url, timeout=3):
+    u = urlsplit(base_url)
+    conn = HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    try:
+        conn.request("GET", "/health")
+        r = conn.getresponse()
+        return json.loads(r.read()) if r.status == 200 else None
+    except (OSError, ValueError):
+        return None
+    finally:
+        conn.close()
+
+
+def warm(base_url, timeout):
+    u = urlsplit(base_url)
+    conn = HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+    try:
+        conn.request("POST", "/warm", body=b"", headers={"Content-Length": "0"})
+        r = conn.getresponse()
+        r.read()
+        if r.status != 200:
+            raise RuntimeError(f"warm: HTTP {r.status}")
+    finally:
+        conn.close()
+
+
+def paragraphs(res):
+    segs = res.get("segments") or []
+    if not segs:
+        return (res.get("text") or "").strip()
+    paras, cur, prev_end = [], [], None
+    for s in segs:
+        t = (s.get("text") or "").strip()
+        if not t:
+            continue
+        if cur and prev_end is not None and s.get("start", 0) - prev_end > 2.0:   # a pause of > 2 s starts a paragraph
+            paras.append(" ".join(cur))
+            cur = []
+        cur.append(t)
+        prev_end = s.get("end", prev_end)
+    if cur:
+        paras.append(" ".join(cur))
+    return "\n\n".join(paras)
+
+
+def transcribe_job(meta):
+    wav = Path(meta["wav"])
+    dur = float(meta.get("duration_s") or 0)
+    title = (meta.get("slide") or {}).get("title") or ""
+    fields = {"model": MODEL, "response_format": "verbose_json"}
+    if meta.get("lang") and meta["lang"] != "auto":
+        fields["language"] = meta["lang"]
+    if title:
+        fields["prompt"] = f"Talk about the presentation slide: {title}."   # vocabulary hint (NURBS, PathPilot, ...)
+    errors = []
+    try:
+        if dur < 0.5:
+            raise RuntimeError(f"recording too short ({dur:.1f} s)")
+        wav_bytes = wav.read_bytes()
+        for name, url, tmo, eng in (
+            ("remote", REMOTE, 60 + dur * 0.5, f"faster-whisper {MODEL} on gpu-box (via {REMOTE})"),
+            ("local", LOCAL, 180 + dur * 1.5, None),
+        ):
+            with LOCK:
+                JOBS[str(wav)] = f"transcribing ({name})"
+            h = health(url)
+            if h is None:
+                errors.append(f"{name} {url}: not reachable")
+                continue
+            if eng is None:
+                eng = f"faster-whisper {h.get('model', '?')} {h.get('device', '')}/{h.get('compute_type', '')} on this box (GTX 1070, {url})"
+            t0 = time.monotonic()
+            try:
+                if name == "local" and not h.get("model_loaded", True):   # lazy server: load the model first
+                    with LOCK:
+                        JOBS[str(wav)] = "loading the local model"
+                    warm(url, 180)
+                res = post_transcribe(url, wav_bytes, fields, tmo)
+            except Exception as e:
+                errors.append(f"{name} {url}: {type(e).__name__}: {e}")
+                log("transcribe", name, "failed:", e)
+                continue
+            text = paragraphs(res)
+            if not text.strip():   # a working backend heard nothing: do not try the next one
+                raise RuntimeError(f"no speech recognised ({name}, {dur:.0f} s of audio)")
+            meta.update(engine=eng, language=res.get("language") or meta.get("lang"),
+                        transcribe_s=round(time.monotonic() - t0, 1))
+            md = write_draft(meta, text)
+            with LOCK:
+                LAST.clear()
+                LAST.update(file=str(md), ok=True, at=now_iso(), slide=meta.get("slide"))
+            log("saved", md, f"({name}, {meta['transcribe_s']} s)")
+            notify("✔ Draft saved", f"{md.name}\n{text[:160]}", "normal", 6000)
+            return md
+        raise RuntimeError("; ".join(errors) or "no transcription backend")
+    except Exception as e:
+        log("transcription failed:", e)
+        ef = write_error(meta, str(e))
+        with LOCK:
+            LAST.clear()
+            LAST.update(file=str(ef), ok=False, error=str(e), at=now_iso(), slide=meta.get("slide"))
+        notify("⚠ Dictation NOT transcribed", f"audio kept: {wav.name}\n{e}"[:300], "critical", 0)
+        return None
+    finally:
+        with LOCK:
+            JOBS.pop(str(wav), None)
+
+
+def _header(meta):
+    s = meta.get("slide") or {}
+    n, tot = s.get("n"), s.get("total")
+    rows = [
+        ("slide", f"{n} / {tot}" if n else "unknown"),
+        ("slide_id", meta.get("slide_id")),
+        ("slide_gid", s.get("gid") or None),
+        ("slide_key", s.get("key") or None),
+        ("title", s.get("title") or None),
+        ("started", meta.get("started")),
+        ("stopped", meta.get("stopped")),
+        ("duration_s", meta.get("duration_s")),
+        ("engine", meta.get("engine")),
+        ("language", meta.get("language") or meta.get("lang")),
+        ("transcribe_s", meta.get("transcribe_s")),
+        ("via", meta.get("via")),
+        ("audio", os.path.relpath(meta["wav"], OUT_DIR) if meta.get("wav") else meta.get("raw")),
+    ]
+    out = ["---"]
+    for k, v in rows:
+        if v is not None:
+            out.append(f"{k}: {json.dumps(v, ensure_ascii=False)}")   # JSON scalars are valid YAML
+    out.append("---")
+    return "\n".join(out) + "\n"
+
+
+def _unique(p):
+    if not p.exists():
+        return p
+    for i in range(2, 100):
+        q = p.with_name(p.name.replace(".md", f".{i}.md"))
+        if not q.exists():
+            return q
+    return p
+
+
+def write_draft(meta, text):
+    s = meta.get("slide") or {}
+    md = _unique(OUT_DIR / (meta["base"] + ".md"))
+    body = _header(meta) + f"\n# {s.get('title') or 'Unknown slide'}\n\n{text.strip()}\n"
+    tmp = md.with_suffix(".md.tmp")
+    tmp.write_text(body, encoding="utf8")
+    tmp.replace(md)
+    err = OUT_DIR / (meta["base"] + ".error.md")
+    if err.exists():   # a successful retry clears the error note
+        err.unlink()
+    return md
+
+
+def write_error(meta, reason):
+    ef = OUT_DIR / (meta["base"] + ".error.md")
+    audio = meta.get("wav") or meta.get("raw")
+    ef.write_text(
+        _header(meta) + f"\n# NOT TRANSCRIBED: {(meta.get('slide') or {}).get('title') or 'unknown slide'}\n\n"
+        f"Reason: {reason}\n\nThe audio is kept: `{audio}`\n\nRetry when a backend is up:\n\n"
+        f"    slide-dictate retry '{audio}'\n", encoding="utf8")
+    return ef
+
+
+def retry(wav):
+    wav = Path(wav).expanduser().resolve()
+    side = wav.with_suffix(".json")
+    if not wav.exists():
+        return 404, {"error": f"no such file: {wav}"}
+    if wav.suffix == ".raw":   # left over from a crash
+        w2 = wav.with_suffix(".wav")
+        raw_to_wav(wav, w2)
+        wav.unlink()
+        wav = w2
+    meta = json.loads(side.read_text(encoding="utf8")) if side.exists() else {"base": wav.stem, "slide": {}, "slide_id": "unknown-slide"}
+    with wave.open(str(wav)) as w:
+        meta["duration_s"] = round(w.getnframes() / w.getframerate(), 1)
+    meta["wav"] = str(wav)
+    meta.setdefault("lang", LANG)
+    meta.pop("raw", None)
+    with LOCK:
+        JOBS[str(wav)] = "queued"
+    threading.Thread(target=transcribe_job, args=(meta,), daemon=True).start()
+    return 200, {"ok": True, "wav": str(wav), "duration_s": meta["duration_s"]}
+
+
+def recover_orphans():
+    """A .raw without a running capture = the service died while recording: keep the audio, transcribe it."""
+    if not AUDIO_DIR.is_dir():
+        return
+    for raw in sorted(AUDIO_DIR.glob("*.raw")):
+        log("recovering orphan recording", raw.name)
+        side = raw.with_suffix(".json")
+        if side.exists():
+            m = json.loads(side.read_text(encoding="utf8"))
+            m.setdefault("stopped", datetime.fromtimestamp(raw.stat().st_mtime).astimezone().isoformat(timespec="seconds"))
+            m["recovered"] = "the service restarted during this recording"
+            side.write_text(json.dumps(m, ensure_ascii=False, indent=1), encoding="utf8")
+        try:
+            retry(raw)
+        except Exception as e:
+            log("orphan recovery failed:", e)
+
+
+# ------------------------------------------------------------------ HTTP service
+
+class H(BaseHTTPRequestHandler):
+    server_version = "slide-dictate/1"
+
+    def log_message(self, fmt, *a):
+        pass
+
+    def origin_ok(self):
+        o = self.headers.get("Origin")
+        return o is None or bool(ORIGIN_OK.match(o))
+
+    def cors(self):
+        o = self.headers.get("Origin")
+        if o and ORIGIN_OK.match(o):
+            self.send_header("Access-Control-Allow-Origin", o)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def reply(self, code, obj):
+        data = json.dumps(obj, ensure_ascii=False).encode("utf8")
+        self.send_response(code)
+        self.cors()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        self.send_response(204 if self.origin_ok() else 403)
+        self.cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):
+        if not self.origin_ok():
+            return self.reply(403, {"error": "origin not allowed"})
+        p = self.path.split("?")[0]
+        if p == "/status":
+            return self.reply(200, status())
+        if p == "/health":
+            return self.reply(200, {"ok": True, "dir": str(OUT_DIR), "remote": REMOTE, "local": LOCAL, "lang": LANG})
+        self.reply(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self.origin_ok():
+            return self.reply(403, {"error": "origin not allowed"})
+        p = self.path.split("?")[0]
+        try:
+            n = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(n) if 0 < n <= 65536 else b""
+            body = json.loads(raw.decode("utf8")) if raw.strip() else {}
+            if not isinstance(body, dict):
+                raise ValueError("body must be a JSON object")
+        except (ValueError, UnicodeDecodeError) as e:
+            return self.reply(400, {"error": f"bad body: {e}"})
+        try:
+            if p == "/start":
+                sl = {k: body.get(k) for k in ("gid", "key", "n", "total", "title")}
+                for k in ("gid", "key", "title"):
+                    sl[k] = str(sl[k] or "")[:600]
+                for k in ("n", "total"):
+                    sl[k] = int(sl[k]) if str(sl[k] or "").isdigit() else None
+                lang = str(body.get("lang") or "") or None
+                if lang and not re.fullmatch(r"[a-z]{2}|auto", lang):
+                    return self.reply(400, {"error": "lang must be a 2-letter code or auto"})
+                return self.reply(*start(sl, lang, str(body.get("via") or "deck")[:20]))
+            if p == "/stop":
+                return self.reply(*stop())
+            if p == "/cancel":
+                return self.reply(*stop(discard=True))
+            if p == "/retry":
+                w = str(body.get("wav") or "")
+                if not w or not Path(w).expanduser().resolve().is_relative_to(AUDIO_DIR.resolve()):
+                    return self.reply(400, {"error": f"wav must be a file in {AUDIO_DIR}"})
+                return self.reply(*retry(w))
+        except Exception as e:
+            traceback.print_exc()
+            return self.reply(500, {"error": f"{type(e).__name__}: {e}"})
+        self.reply(404, {"error": "not found"})
+
+
+def serve(port):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    recover_orphans()
+    srv = ThreadingHTTPServer(("127.0.0.1", port), H)
+    srv.daemon_threads = True
+
+    def bye(*_):
+        with LOCK:
+            rec = bool(REC)
+        if rec:   # never drop a recording on shutdown: finish it (transcription may not complete; the WAV is kept)
+            stop()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, bye)
+    log(f"slide-dictate on http://127.0.0.1:{port} -> {OUT_DIR} (remote {REMOTE}, local {LOCAL}, lang {LANG})")
+    srv.serve_forever()
+
+
+# ------------------------------------------------------------------ CLI (i3 hotkeys)
+
+NOTES_RE = re.compile(r"^Notes · (\d+) / (\d+) · ")
+
+
+def window_slide(title_file=None):
+    """The shown slide from the speaker-notes window title, mapped to the deck's stable id via deck-grayed."""
+    titles = []
+    if title_file:
+        titles = [Path(title_file).read_text(encoding="utf8").strip()]
+    else:
+        try:
+            out = subprocess.run(["wmctrl", "-l"], capture_output=True, text=True, timeout=5).stdout
+            titles = [ln.split(None, 3)[3] for ln in out.splitlines() if len(ln.split(None, 3)) == 4]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    m = next((NOTES_RE.match(t) for t in titles if NOTES_RE.match(t)), None)
+    if not m:
+        return None, "no speaker-notes window (title 'Notes · N / T · ...'): open the notes tab with p"
+    shown, total = int(m.group(1)), int(m.group(2))
+    sl = {"gid": "", "key": "", "n": shown, "total": total, "title": ""}
+    try:
+        dg = json.loads(subprocess.run([shutil.which("deck-grayed") or str(HOME / ".local/bin/deck-grayed"), "--json", "--no-write"], capture_output=True,
+                                       text=True, timeout=60).stdout)
+        rows = dg["order"]["slides"]
+        act = dg["active"]
+        if total == act.get("count") and 0 < shown <= len(act["slides"]):
+            deck_n = act["slides"][shown - 1]          # grayed slides skipped: N counts the presented slides
+        elif total == len(rows):
+            deck_n = shown                              # skipping off: N is the deck position
+        else:
+            return sl, f"slide {shown} / {total}: cannot map to the deck (deck-grayed: {act.get('count')} presented, {len(rows)} total)"
+        row = next(r for r in rows if r["n"] == deck_n)
+        sl.update(gid=row["id"], title=row["title"])
+        if not re.search(r"[ |·#]", row["id"]):
+            sl["key"] = row["id"]                       # short keyed ids (e.g. "contributions")
+        return sl, None
+    except Exception as e:
+        return sl, f"deck-grayed lookup failed: {e}"
+
+
+def client(method, path, body=None, timeout=10):
+    conn = HTTPConnection("127.0.0.1", PORT, timeout=timeout)
+    try:
+        data = json.dumps(body).encode() if body is not None else None
+        conn.request(method, path, body=data, headers={"Content-Type": "application/json"} if data else {})
+        r = conn.getresponse()
+        return r.status, json.loads(r.read() or b"{}")
+    finally:
+        conn.close()
+
+
+def ensure_service():
+    try:
+        return client("GET", "/health", timeout=2)[0] == 200
+    except OSError:
+        pass
+    subprocess.run(["systemctl", "--user", "start", "slide-dictate.service"], capture_output=True, timeout=20)
+    for _ in range(20):
+        time.sleep(0.25)
+        try:
+            if client("GET", "/health", timeout=2)[0] == 200:
+                return True
+        except OSError:
+            pass
+    notify("Dictation service not running", "systemctl --user start slide-dictate", "critical", 8000)
+    return False
+
+
+def cli(argv):
+    import argparse
+    ap = argparse.ArgumentParser(prog="slide-dictate", description=__doc__.split("\n")[0])
+    ap.add_argument("cmd", choices=("start", "stop", "toggle", "cancel", "status", "retry", "serve"))
+    ap.add_argument("wav", nargs="?")
+    ap.add_argument("--lang")
+    ap.add_argument("--title-file", help="read the notes-window title from this file (testing)")
+    ap.add_argument("--port", type=int, default=PORT)
+    a = ap.parse_args(argv)
+    if a.cmd == "serve":
+        return serve(a.port)
+    if not ensure_service():
+        print("slide-dictate service not reachable", file=sys.stderr)
+        return 2
+    if a.cmd == "toggle":
+        a.cmd = "stop" if client("GET", "/status")[1].get("state") == "recording" else "start"
+    if a.cmd == "start":
+        sl, warn = window_slide(a.title_file)
+        if sl is None:
+            sl = {"gid": "", "key": "", "n": None, "total": None, "title": ""}
+        if warn:
+            notify("Dictation: slide not identified", warn + "\nrecording anyway (file: unknown-slide)", "normal", 6000)
+            print("warning:", warn, file=sys.stderr)
+        code, res = client("POST", "/start", dict(sl, lang=a.lang, via="i3"))
+    elif a.cmd in ("stop", "cancel"):
+        code, res = client("POST", "/" + a.cmd, {})
+    elif a.cmd == "retry":
+        if not a.wav:
+            ap.error("retry needs the WAV path")
+        code, res = client("POST", "/retry", {"wav": str(Path(a.wav).expanduser().resolve())})
+    else:
+        code, res = client("GET", "/status")
+    print(json.dumps(res, ensure_ascii=False, indent=1))
+    if code == 409:
+        notify("Dictation", res.get("error", "busy"), "low", 2500)
+    return 0 if code == 200 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(cli(sys.argv[1:]) or 0)
